@@ -1,0 +1,25 @@
+{
+  "name": "example-basic",
+  "type": "module",
+  "scripts": {
+    "dev": "vinxi dev",
+    "build": "vinxi build",
+    "start": "vinxi start",
+    "version": "vinxi version"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^2.0.38",
+    "@solidjs/meta": "^0.29.4",
+    "@solidjs/router": "^0.15.0",
+    "@solidjs/start": "^1.1.0",
+    "ai": "^5.0.95",
+    "dotenv": "^17.2.3",
+    "lucide-solid": "^0.554.0",
+    "solid-js": "^1.9.5",
+    "vinxi": "^0.5.7",
+    "zod": "^4.1.12"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

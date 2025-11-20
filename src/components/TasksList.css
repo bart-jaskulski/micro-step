@@ -1,0 +1,5 @@
+.tasks-list {
+  > :not(:last-child) {
+    margin-block-end: 1em;
+  }
+}
