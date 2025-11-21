@@ -42,12 +42,17 @@
   line-height: 1.5;
   color: #333;
 
+  &:has(textarea:read-only) {
+    background-color: #f9f9f9;
+  }
+
   &:focus-within {
     border-color: #007bff;
     box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
   }
 
   textarea {
+    background: inherit;
     width: 100%;
     border: none;
     resize: none;

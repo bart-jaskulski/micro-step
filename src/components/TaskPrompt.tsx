@@ -1,77 +1,89 @@
-import { createSignal, For, Show } from "solid-js"
+import { createEffect, createSignal, For, Show } from "solid-js"
+import { useSubmission } from "@solidjs/router";
 import ArrowUp from "lucide-solid/icons/arrow-up"
 import ScissorsLineDashed from "lucide-solid/icons/scissors-line-dashed"
-import { addTask } from "../taskStore"
+import { addTask } from "~/taskStore"
+import { breakdownTask } from "~/actions/tasks"
 import "./TaskPrompt.css"
 
 type Granularity = "low" | "medium" | "high"
 
 export default function TaskPrompt() {
-  const [granularity, setGranularity] = createSignal<Granularity>("medium");
-  const [granularityMenuOpen, setGranularityMenuOpen] = createSignal(false);
-  let formRef: HTMLFormElement | undefined;
-  let textareaRef: HTMLTextAreaElement | undefined;
+  const [mode, setMode] = createSignal<"default" | "clarify">("default");
+  const submission = useSubmission(breakdownTask);
+  const [clarification, setClarification] = createSignal<string>("");
 
-  const handler = async (e: SubmitEvent) => {
-    console.log("Submitting with granularity:", granularity());
-    e.preventDefault();
-    console.log(JSON.stringify(Object.fromEntries(new FormData(formRef!).entries())));
+  createEffect(async () => {
+    if (submission.result) {
+      switch (submission.result.action) {
+        case "createTasks":
+          const { tasks } = submission.result;
+          for (const t of tasks) {
+            const transition = document.startViewTransition(() => {
+              addTask(t)
+            });
 
-    const result = await fetch("/api/task", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(Object.fromEntries(new FormData(formRef!).entries())),
-    });
-
-    formRef!.reset();
-
-    const response = await result.json();
-
-    for (const part of response) {
-      if (part.type === "tool-call" && part.toolName === "createTasks") {
-        for (const t of part.input.tasks) {
-          const transition = document.startViewTransition(() => {
-            addTask(t)
-          });
-
-          await transition.finished;
-        }
+            await transition.finished;
+          }
+          break;
+        case "askClarification":
+          setMode("clarify");
+          setClarification(submission.result.question);
+          break;
+        default:
+          return;
       }
     }
-  };
+  });
+
+  const [granularityMenuOpen, setGranularityMenuOpen] = createSignal(false);
+  let textareaRef: HTMLTextAreaElement | undefined;
 
   return (
-    <form ref={formRef} onSubmit={handler} method="post" action="/api/task" class='task-prompt'>
-      <div class="grow-wrap">
-      <textarea ref={textareaRef} name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
-      </div>
-      <div class='task-prompt__bottom'>
-        <div>
-          <button type="button" onClick={() => setGranularityMenuOpen(!granularityMenuOpen())}><ScissorsLineDashed/></button>
-          <Show when={granularityMenuOpen()}>
-            <div class='granularity-options'>
-              <For each={["low", "medium", "high"] as Granularity[]}>
-                {(level) => (
-                  <label>
-                    <input
-                      name="granularity"
-                      type="radio"
-                      value={level}
-                      bool:checked={granularity() === level}
-                      class={granularity() === level ? "active" : ""}
-                      onChange={() => setGranularity(level)}
-                    />
-                    {level}
-                  </label>
-                )}
-              </For>
-            </div>
-          </Show>
+    <>
+      <form action={breakdownTask} method="post" class='task-prompt'>
+        <div class="grow-wrap">
+          <textarea bool:readonly={mode() === "clarify"} ref={textareaRef} name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
         </div>
-        <button><ArrowUp/></button>
-      </div>
-    </form>
+        <Show when={mode() === "default"}>
+          <div class='task-prompt__bottom'>
+            <div>
+              <button type="button" onClick={() => setGranularityMenuOpen(!granularityMenuOpen())}><ScissorsLineDashed/></button>
+              <Show when={granularityMenuOpen()}>
+                <div class='granularity-options'>
+                  <For each={["low", "medium", "high"] as Granularity[]}>
+                    {(level) => (
+                      <label>
+                        <input
+                          name="granularity"
+                          type="radio"
+                          value={level}
+                        />
+                        {level}
+                      </label>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+            <button type="submit"><ArrowUp/></button>
+          </div>
+        </Show>
+      </form>
+      <Show when={mode() === "clarify"}>
+        <div class='clarification-box'>
+          <p>{clarification()}</p>
+          <button type="button" onClick={() => setMode("default")}>Skip</button>
+        </div>
+        <form action={breakdownTask} method="post" class='task-prompt clarification-form'>
+          <div class="grow-wrap">
+            <textarea name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
+          </div>
+          <div class='task-prompt__bottom'>
+            <button type="submit"><ArrowUp/></button>
+          </div>
+        </form>
+      </Show>
+    </>
   );
 }
