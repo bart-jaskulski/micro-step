@@ -1,4 +1,3 @@
-
 import { action } from "@solidjs/router";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText, tool } from "ai";
@@ -9,9 +8,11 @@ const openai = createGoogleGenerativeAI({
 });
 
 export const breakdownTask = action(async (data: FormData) => {
-"use server";
+  "use server";
   const task = data.get("task") as string;
   const granularity = data.get("granularity") as string;
+  const clarification = data.get("clarification") as string | null;
+  const hasClarification = !!clarification;
 
   let granularityInstruction = "Break tasks into standard, manageable chunks.";
   if (granularity === "low") granularityInstruction = "Keep tasks high-level and broad. Do not over-fragment.";
@@ -21,15 +22,20 @@ export const breakdownTask = action(async (data: FormData) => {
     model: openai("gemini-2.5-flash-lite"),
     prompt: task,
     system: `
-      You are an expert task decomposer for neurodivergent users.
+You are an expert task decomposer for neurodivergent users.
 
-      RULES:
-      1. ${granularityInstruction}
-      2. DETECT LANGUAGE: Output tasks in the SAME language as the user's prompt.
-      3. If the user's request is too vague (e.g., "work", "project"), use the 'askClarification' tool.
-      4. If the request is actionable, use the 'createTasks' tool immediately.
-      5. Do not be chatty. Only use tools.
-    `,
+RULES:
+1. ${granularityInstruction}
+2. DETECT LANGUAGE: Output tasks in the SAME language as the user's prompt.
+${
+  // 3. Only inject this rule if the tool is actually available
+  !hasClarification 
+    ? `3. If the user's request is too vague (e.g., "work", "project"), use the 'askClarification' tool.` 
+    : ""
+}
+4. If the request is actionable, use the 'createTasks' tool immediately.
+5. Do not be chatty. Only use tools.
+`,
     tools: {
       createTasks: tool({
         description: "Create a list of tasks from the prompt",
@@ -43,12 +49,14 @@ export const breakdownTask = action(async (data: FormData) => {
           ),
         }),
       }),
-      askClarification: tool({
-        description: "Ask the user for more details if the prompt is too vague",
-        inputSchema: z.object({
-          question: z.string().describe("The clarifying question to ask the user"),
+      ...(!hasClarification &&
+        {askClarification: tool({
+          description: "Ask the user for more details if the prompt is too vague",
+          inputSchema: z.object({
+            question: z.string().describe("The clarifying question to ask the user"),
+          }),
         }),
-      }),
+        })
     },
   });
 

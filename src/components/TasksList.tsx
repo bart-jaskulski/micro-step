@@ -1,12 +1,15 @@
 import { For } from "solid-js";
+import { clientOnly } from "@solidjs/start";
 import TaskItem from "./TaskItem";
-import { taskStore } from "../taskStore";
+import { tasks } from "~/stores/taskStore";
 import './TasksList.css';
 
-export default function TasksList() {
+export default clientOnly(async () => ({ default: TasksList }), { lazy: true });
+
+function TasksList() {
   return (
     <div class="tasks-list">
-      <For each={taskStore.tasks}>
+      <For each={tasks()}>
         {(task => (
           <TaskItem {...task}/>
         ))}

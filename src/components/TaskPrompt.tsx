@@ -2,8 +2,8 @@ import { createEffect, createSignal, For, Show } from "solid-js"
 import { useSubmission } from "@solidjs/router";
 import ArrowUp from "lucide-solid/icons/arrow-up"
 import ScissorsLineDashed from "lucide-solid/icons/scissors-line-dashed"
-import { addTask } from "~/taskStore"
-import { breakdownTask } from "~/actions/tasks"
+import { addTask } from "~/stores/taskStore"
+import { breakdownTask } from "~/actions/taskActions"
 import "./TaskPrompt.css"
 
 type Granularity = "low" | "medium" | "high"
@@ -37,13 +37,15 @@ export default function TaskPrompt() {
   });
 
   const [granularityMenuOpen, setGranularityMenuOpen] = createSignal(false);
+  const [granularity, setGranularity] = createSignal<Granularity>("medium");
   let textareaRef: HTMLTextAreaElement | undefined;
 
   return (
-    <>
-      <form action={breakdownTask} method="post" class='task-prompt'>
+    <form action={breakdownTask} method="post">
+      <input type="hidden" name="granularity" value={granularity()} />
+      <div class='task-prompt'>
         <div class="grow-wrap">
-          <textarea bool:readonly={mode() === "clarify"} ref={textareaRef} name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
+          <textarea class={mode()} ref={textareaRef} name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
         </div>
         <Show when={mode() === "default"}>
           <div class='task-prompt__bottom'>
@@ -57,6 +59,8 @@ export default function TaskPrompt() {
                         <input
                           name="granularity"
                           type="radio"
+                          checked={granularity() === level}
+                          onChange={() => setGranularity(level)}
                           value={level}
                         />
                         {level}
@@ -69,21 +73,21 @@ export default function TaskPrompt() {
             <button type="submit"><ArrowUp/></button>
           </div>
         </Show>
-      </form>
+      </div>
       <Show when={mode() === "clarify"}>
-        <div class='clarification-box'>
+        <output class='clarification-box'>
           <p>{clarification()}</p>
           <button type="button" onClick={() => setMode("default")}>Skip</button>
-        </div>
-        <form action={breakdownTask} method="post" class='task-prompt clarification-form'>
+        </output>
+        <div class='task-prompt clarification-form'>
           <div class="grow-wrap">
-            <textarea name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
+            <textarea name="clarification" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
           </div>
           <div class='task-prompt__bottom'>
             <button type="submit"><ArrowUp/></button>
           </div>
-        </form>
+        </div>
       </Show>
-    </>
+    </form>
   );
 }
