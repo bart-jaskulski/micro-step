@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, Show } from "solid-js"
 import { useSubmission } from "@solidjs/router";
 import ArrowUp from "lucide-solid/icons/arrow-up"
 import ScissorsLineDashed from "lucide-solid/icons/scissors-line-dashed"
+import Checked from "lucide-solid/icons/check"
 import { addTask } from "~/stores/taskStore"
 import { breakdownTask } from "~/actions/taskActions"
 import "./TaskPrompt.css"
@@ -64,6 +65,9 @@ export default function TaskPrompt() {
                           value={level}
                         />
                         {level}
+                        <Show when={granularity() === level}>
+                          <Checked />
+                        </Show>
                       </label>
                     )}
                   </For>

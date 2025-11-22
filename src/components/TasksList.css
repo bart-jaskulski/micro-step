@@ -1,5 +1,8 @@
 .tasks-list {
-  > :not(:last-child) {
-    margin-block-end: 1em;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: min(760px, 100%);
+  margin: 0 auto 2rem;
+  padding: 0.25rem;
 }

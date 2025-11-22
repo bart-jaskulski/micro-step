@@ -1,21 +1,128 @@
 .task-item {
   display: flex;
-  padding: 1em;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background-color: #f9f9f9;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  animation: slideFromBottom 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  align-items: center;
+  /* TODO: adjust height based on content */
+  height: 80px;
+  padding: 0;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-subtle, #d8e2ec);
+  box-shadow: var(--card-shadow, 0 18px 42px -32px rgba(15, 23, 42, 0.5));
+  position: relative;
+  animation: slideFromBottom 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+
+  /*
+&:hover {
+transform: translateY(-2px);
+box-shadow: 0 22px 50px -32px rgba(15, 23, 42, 0.48);
+border-color: color-mix(in srgb, var(--accent, #1a9bb2) 25%, var(--border-subtle, #d8e2ec));
+}
+*/
+
+  .handle {
+    height: 100%;
+    width: 24px;
+    padding: 0.1em;
+    background: var(--surface-soft, #f4f7fb);
+    border: 1px dashed var(--border-subtle, #d8e2ec);
+    border-radius: 12px;
+    color: var(--muted, #5b6475);
+    cursor: grab;
+  }
+
+  :has(input[type="checkbox"]:checked) {
+    .text {
+      text-decoration: line-through;
+      color: color-mix(in srgb, var(--muted, #5b6475) 80%, #9aa3b5);
+    }
+
+    .due {
+      opacity: 0.7;
+    }
+  }
+
+  .content {
+    width: 100%;
+    padding: 0.75em;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.75rem 0.85rem;
+  }
+
+  svg {
+    width: 1rem;
+    height: 1rem;
+  }
 }
 
+.task-item__checkbox {
+  width: 1.2rem;
+  height: 1.2rem;
+  accent-color: var(--accent, #1a9bb2);
+  border-radius: 6px;
+}
+
+.task-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--ink, #0f172a);
+}
+
+.task-item__actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.task-item__action {
+  display: grid;
+  place-items: center;
+  background: var(--surface-soft, #f4f7fb);
+  border: 1px solid var(--border-subtle, #d8e2ec);
+  color: var(--muted, #5b6475);
+  padding: 0.55rem 0.6rem;
+  border-radius: 12px;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.task-item__action:hover {
+  background: color-mix(in srgb, var(--accent-soft, #e6f5f7) 70%, #fff);
+  border-color: color-mix(in srgb, var(--accent, #1a9bb2) 30%, var(--border-subtle, #d8e2ec));
+  color: var(--accent, #1a9bb2);
+  transform: translateY(-1px);
+}
+
+.task-item__action--remove {
+  background: #fff4f2;
+  border-color: #f1c8c1;
+  color: #b42318;
+}
+
+.task-item__action--remove:hover {
+  background: #ffe7e3;
+  border-color: #e19e96;
+}
+
+
 @keyframes slideFromBottom {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+from {
+  opacity: 0;
+  transform: translateY(24px);
+}
+to {
+  opacity: 1;
+  transform: translateY(0);
+}
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-item {
+    animation: none;
+    transition: none;
   }
 }
 
