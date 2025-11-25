@@ -4,6 +4,7 @@ import GripVertical from "lucide-solid/icons/grip-vertical";
 import X from "lucide-solid/icons/x";
 import { deleteTask, updateTask } from "~/stores/taskStore";
 import type { Task } from "~/stores/taskStore";
+import { useDrag } from "./DragProvider";
 
 import './TaskItem.css';
 
@@ -12,6 +13,7 @@ type TaskItemProps = Task & {
 };
 
 export default function TaskItem(props: TaskItemProps) {
+  const drag = useDrag();
   const [isEditing, setIsEditing] = createSignal(false);
   const [draft, setDraft] = createSignal(props.text);
   let inputRef: HTMLInputElement | undefined;
@@ -42,7 +44,14 @@ export default function TaskItem(props: TaskItemProps) {
 
   return (
     <div class="task-item">
-      <GripVertical class="handle" />
+      <span
+        class="handle"
+        role="button"
+        aria-label="Drag to reorder"
+        onPointerDown={(event) => drag.startDrag(event, props.id, event.currentTarget as HTMLElement)}
+      >
+        <GripVertical />
+      </span>
       <div class="content">
         <input
           class="task-item__checkbox"
