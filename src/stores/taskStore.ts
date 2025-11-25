@@ -1,15 +1,17 @@
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
-import { createMemo, onMount } from "solid-js";
+import { createMemo } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { isServer } from "solid-js/web";
 import { LexoRank } from "lexorank";
+import { generateKey, importKey } from "~/lib/crypto";
+import { EncryptedWsProvider } from "~/lib/encryptedWsProvider";
 
 const nanoid = () => {
   const array = new Uint8Array(16);
   crypto.getRandomValues(array);
-  return Array.from(array, byte => ('0' + byte.toString(16)).slice(-2)).join('');
-}
+  return Array.from(array, byte => ("0" + byte.toString(16)).slice(-2)).join("");
+};
 
 export type Task = {
   id: string;
@@ -26,6 +28,12 @@ export type TreeNode = Task & {
   effectiveDueDate: number | null; // Bubbled up date
 };
 
+type DeviceInfo = {
+  id: string;
+  label: string;
+  lastSeen: number;
+};
+
 const compareDueThenRank = (a: Task, b: Task) => {
   const aDue = a.dueAt ?? Number.POSITIVE_INFINITY;
   const bDue = b.dueAt ?? Number.POSITIVE_INFINITY;
@@ -40,7 +48,6 @@ const computeInitialRank = (parentId: string | null, dueAt: number | null) => {
     return LexoRank.middle().toString();
   }
 
-  // Insert by due date (nulls last), fall back to rank ordering
   const sorted = siblings.slice().sort(compareDueThenRank);
   const targetIndex = sorted.findIndex(sibling => {
     const siblingDue = sibling.dueAt ?? Number.POSITIVE_INFINITY;
@@ -66,50 +73,156 @@ const computeInitialRank = (parentId: string | null, dueAt: number | null) => {
 
 const doc = new Y.Doc();
 const yTasks = doc.getMap<Task>("tasks");
-let provider: IndexeddbPersistence;
+const yDevices = doc.getMap<DeviceInfo>("devices");
+
+let idbProvider: IndexeddbPersistence | undefined;
+let wsProvider: EncryptedWsProvider | null = null;
+let heartbeat: number | undefined;
+let initialized = false;
+
+const STORAGE_KEYS = {
+  room: "micro-step-room",
+  key: "micro-step-key",
+  device: "micro-step-device-id",
+  deviceLabel: "micro-step-device-label",
+};
 
 const [state, setState] = createStore({
   tasks: {} as Record<string, Task>,
+  devices: {} as Record<string, DeviceInfo>,
   isSynced: false,
+  isOnline: false,
+  roomId: "",
+  secretKey: "",
+  deviceLabel: "",
+  deviceId: "",
 });
 
-// --- 3. The Sync Logic ---
-// We wrap this in a function to ensure it only runs on the client
-const init = () => {
-  if (isServer) return;
-  if (provider) return; // Already initialized
+const ensureDeviceId = () => {
+  if (isServer) return "";
+  let id = localStorage.getItem(STORAGE_KEYS.device);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(STORAGE_KEYS.device, id);
+  }
+  return id;
+};
 
-  provider = new IndexeddbPersistence("my-app-tasks", doc);
+const defaultDeviceLabel = () => {
+  if (isServer) return "device";
+  const platform = (navigator as any).userAgentData?.platform ?? navigator.platform ?? "device";
+  const hint = navigator.userAgent.split(" ").slice(0, 2).join(" ");
+  return `${platform} · ${hint}`;
+};
 
-  // Update Solid Store whenever Y.js changes
-  yTasks.observe(() => {
-    setState("tasks", reconcile(yTasks.toJSON()));
-  });
+const ensureDeviceLabel = (fallback?: string) => {
+  if (isServer) return "";
+  const existing = localStorage.getItem(STORAGE_KEYS.deviceLabel);
+  const label = existing && existing.trim().length ? existing : (fallback ?? defaultDeviceLabel());
+  localStorage.setItem(STORAGE_KEYS.deviceLabel, label);
+  setState("deviceLabel", label);
+  return label;
+};
 
-  // Mark as synced when IDB loads
-  provider.on("synced", () => {
-    setState("isSynced", true);
+const touchDevice = (deviceId: string, label: string) => {
+  if (!deviceId || isServer) return;
+  doc.transact(() => {
+    yDevices.set(deviceId, { id: deviceId, label, lastSeen: Date.now() });
   });
 };
 
-// Auto-initialize immediately when this file is imported on the client
-onMount(init);
+const bootstrapSession = async () => {
+  if (isServer) return;
+
+  let roomId = localStorage.getItem(STORAGE_KEYS.room);
+  let rawKey = localStorage.getItem(STORAGE_KEYS.key);
+
+  if (typeof window !== "undefined" && window.location.hash.includes("room=")) {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const hashRoom = params.get("room");
+    const hashKey = params.get("key");
+    if (hashRoom && hashKey) {
+      roomId = hashRoom;
+      rawKey = hashKey;
+      localStorage.setItem(STORAGE_KEYS.room, hashRoom);
+      localStorage.setItem(STORAGE_KEYS.key, hashKey);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }
+
+  if (!roomId || !rawKey) {
+    roomId = crypto.randomUUID();
+    rawKey = await generateKey();
+    localStorage.setItem(STORAGE_KEYS.room, roomId);
+    localStorage.setItem(STORAGE_KEYS.key, rawKey);
+  }
+
+  const deviceId = ensureDeviceId();
+  const deviceLabel = ensureDeviceLabel();
+
+  setState({
+    roomId,
+    secretKey: rawKey,
+    deviceLabel,
+    deviceId,
+  });
+
+  return { roomId, rawKey, deviceId, deviceLabel };
+};
+
+const init = async () => {
+  if (isServer || initialized) return;
+  initialized = true;
+
+  const session = await bootstrapSession();
+  if (!session) return;
+
+  const cryptoKey = await importKey(session.rawKey);
+
+  idbProvider = new IndexeddbPersistence(`room-${session.roomId}`, doc);
+
+  yTasks.observe(() => {
+    setState("tasks", reconcile(yTasks.toJSON()));
+  });
+  yDevices.observe(() => {
+    setState("devices", reconcile(yDevices.toJSON()));
+  });
+
+  idbProvider.on("synced", () => {
+    setState("isSynced", true);
+    // After local data is loaded, push a snapshot to seed the relay.
+    wsProvider?.sendSnapshot();
+  });
+
+  wsProvider = new EncryptedWsProvider("/api/ws", session.roomId, cryptoKey, doc, {
+    onStatus: payload => setState("isOnline", payload.connected),
+  });
+
+  // Announce this device once the provider is ready so it propagates.
+  touchDevice(session.deviceId, session.deviceLabel);
+
+  heartbeat = window.setInterval(() => {
+    touchDevice(session.deviceId, ensureDeviceLabel(session.deviceLabel));
+  }, 20000);
+};
+
+if (!isServer) {
+  void init();
+}
 
 export const rawTasks = state.tasks;
 
 export const tasks = createMemo(() => {
-  const tasks = Object.values(state.tasks);
+  const currentTasks = Object.values(state.tasks);
   const nodeMap = new Map<string, TreeNode>();
 
-  // Initialize nodes
-  tasks.forEach(t => {
+  currentTasks.forEach(t => {
     nodeMap.set(t.id, { ...t, children: [], effectiveDueDate: t.dueAt });
   });
 
   const roots: TreeNode[] = [];
 
-  // Build Hierarchy
-  tasks.forEach(t => {
+  currentTasks.forEach(t => {
     const node = nodeMap.get(t.id)!;
     if (t.parentId && nodeMap.has(t.parentId)) {
       nodeMap.get(t.parentId)!.children.push(node);
@@ -118,15 +231,11 @@ export const tasks = createMemo(() => {
     }
   });
 
-  // Recursive Sort & Bubble Function
   const processNode = (node: TreeNode): number | null => {
-    // 1. Process children first (Depth First)
     let minChildDate: number | null = null;
 
     node.children.forEach(child => {
       const childDate = processNode(child);
-
-      // Bubble logic: Find earliest date among children
       if (childDate !== null) {
         if (minChildDate === null || childDate < minChildDate) {
           minChildDate = childDate;
@@ -134,33 +243,27 @@ export const tasks = createMemo(() => {
       }
     });
 
-    // 2. Set effective due date (Self vs Children)
     if (node.dueAt !== null) {
-      node.effectiveDueDate = minChildDate !== null 
-        ? Math.min(node.dueAt, minChildDate) 
+      node.effectiveDueDate = minChildDate !== null
+        ? Math.min(node.dueAt, minChildDate)
         : node.dueAt;
     } else {
       node.effectiveDueDate = minChildDate;
     }
 
-    // 3. Sort Children
-    // Here is where you decide: Rank vs DueDate
-    node.children.sort((a, b) => {
-      // Example: Always sort by Rank (Manual Drag & Drop)
-      // If you want DueDate sorting, change this logic.
-      return a.rank.localeCompare(b.rank);
-    });
+    node.children.sort((a, b) => a.rank.localeCompare(b.rank));
 
     return node.effectiveDueDate;
   };
 
-  // Process roots
   roots.forEach(processNode);
-
-  // Sort roots
   roots.sort((a, b) => a.rank.localeCompare(b.rank));
 
   return roots;
+});
+
+export const deviceList = createMemo(() => {
+  return Object.values(state.devices).sort((a, b) => b.lastSeen - a.lastSeen);
 });
 
 type NewTaskPayload = {
@@ -188,8 +291,8 @@ export const addTask = (data: NewTaskPayload, parentId: string | null = null) =>
     dueAt,
     rank,
   };
-  doc.transact(() => {
 
+  doc.transact(() => {
     yTasks.set(id, newTask);
   });
 
@@ -206,16 +309,15 @@ export const updateTask = (id: string, fields: Partial<Task>) => {
 };
 
 export const moveTask = (
-  taskId: string, 
-  newParentId: string | null, 
-  prevSiblingRank?: string, 
+  taskId: string,
+  newParentId: string | null,
+  prevSiblingRank?: string,
   nextSiblingRank?: string
 ) => {
   doc.transact(() => {
     const task = yTasks.get(taskId);
     if (!task) return;
 
-    // Calculate new rank between siblings
     let newRank;
     if (!prevSiblingRank && !nextSiblingRank) {
       newRank = LexoRank.middle();
@@ -227,10 +329,10 @@ export const moveTask = (
       newRank = LexoRank.parse(prevSiblingRank!).between(LexoRank.parse(nextSiblingRank!));
     }
 
-    yTasks.set(taskId, { 
-      ...task, 
-      parentId: newParentId, 
-      rank: newRank.toString() 
+    yTasks.set(taskId, {
+      ...task,
+      parentId: newParentId,
+      rank: newRank.toString(),
     });
   });
 };
@@ -256,4 +358,34 @@ export const deleteTask = (id: string) => {
 
     toRemove.forEach(taskId => yTasks.delete(taskId));
   });
+};
+
+export const syncState = state;
+
+export const getDeviceId = () => state.deviceId;
+
+export const getPairingLink = () => {
+  if (typeof window === "undefined") return "";
+  if (!state.roomId || !state.secretKey) return "";
+  return `${window.location.origin}/#room=${state.roomId}&key=${state.secretKey}`;
+};
+
+export const rotateRoom = async () => {
+  if (isServer) return;
+  const newRoom = crypto.randomUUID();
+  const newKey = await generateKey();
+  localStorage.setItem(STORAGE_KEYS.room, newRoom);
+  localStorage.setItem(STORAGE_KEYS.key, newKey);
+  window.location.hash = `room=${newRoom}&key=${newKey}`;
+  window.location.reload();
+};
+
+export const updateDeviceLabel = (label: string) => {
+  if (isServer) return;
+  const trimmed = label.trim();
+  const next = trimmed.length ? trimmed : defaultDeviceLabel();
+  localStorage.setItem(STORAGE_KEYS.deviceLabel, next);
+  setState("deviceLabel", next);
+  const deviceId = ensureDeviceId();
+  touchDevice(deviceId, next);
 };
