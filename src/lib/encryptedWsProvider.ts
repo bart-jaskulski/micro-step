@@ -1,31 +1,50 @@
 import * as Y from "yjs";
 import { encryptData, decryptData } from "~/lib/crypto"; // Assumes the crypto helpers from previous step
 
+type ProviderOptions = {
+  onStatus?: (payload: { connected: boolean; synced?: boolean }) => void;
+};
+
 export class EncryptedWsProvider {
   private ws: WebSocket | null = null;
   private doc: Y.Doc;
   private roomId: string;
   private key: CryptoKey;
   private url: string;
+  private options?: ProviderOptions;
 
   // Status flags for UI
   public connected = false;
   public synced = false;
 
+  public async sendSnapshot() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const snapshot = Y.encodeStateAsUpdate(this.doc);
+      const encrypted = await encryptData(this.key, snapshot);
+      this.ws.send(encrypted);
+    } catch (err) {
+      console.error("[WS] Failed to push snapshot", err);
+    }
+  }
+
   constructor(
     serverUrl: string, 
     roomId: string, 
     key: CryptoKey, 
-    doc: Y.Doc
+    doc: Y.Doc,
+    options?: ProviderOptions
   ) {
     this.roomId = roomId;
     this.key = key;
     this.doc = doc;
+    this.options = options;
 
     // Construct absolute WebSocket URL
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     this.url = `${protocol}//${host}${serverUrl}?room=${roomId}`;
+    console.log("[WS] Connecting to:", this.url);
 
     this.connect();
 
@@ -43,12 +62,18 @@ export class EncryptedWsProvider {
       // In a more complex app, you might want to track sync state 
       // by waiting for a specific "end of history" message from server
       this.synced = true; 
+      this.options?.onStatus?.({ connected: true, synced: this.synced });
+      void this.sendSnapshot();
     };
 
-    this.ws.onclose = () => {
-      console.log("[WS] Disconnected. Reconnecting in 3s...");
+    this.ws.onclose = (ev) => {
+      console.log(
+        "[WS] Disconnected. Reconnecting in 3s...",
+        `code=${ev.code}, reason=${ev.reason || "none"}, clean=${ev.wasClean}`
+      );
       this.connected = false;
       this.synced = false;
+      this.options?.onStatus?.({ connected: false, synced: this.synced });
       setTimeout(() => this.connect(), 3000);
     };
 
