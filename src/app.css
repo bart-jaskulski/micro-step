@@ -1,4 +1,4 @@
-@import './reset.css';
+@import './reset.css' layer(reset);
 
 :root {
   --bg: #eef3f7;
@@ -44,8 +44,6 @@
     border-radius: 10px;
     border: 1px solid var(--border-subtle, #d8e2ec);
     background-color: var(--surface, #fff);
-    display: grid;
-    place-items: center;
     transition: background-color 0.15s ease, border-color 0.15s ease,
       box-shadow 0.15s ease, transform 0.15s ease;
 

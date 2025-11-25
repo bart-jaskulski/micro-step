@@ -19,9 +19,17 @@ export default function TaskPrompt() {
       switch (submission.result.action) {
         case "createTasks":
           const { tasks } = submission.result;
+
+          let newTask;
+          let transition = document.startViewTransition(async () => {
+            newTask = addTask({ content: submission.result.title, dueDate: undefined });
+            await transition.finished;
+          });
+
+          console.log(newTask);
           for (const t of tasks) {
-            const transition = document.startViewTransition(() => {
-              addTask(t)
+            transition = document.startViewTransition(() => {
+              addTask(t, newTask!.id);
             });
 
             await transition.finished;

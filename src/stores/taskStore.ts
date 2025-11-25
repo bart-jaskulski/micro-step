@@ -6,9 +6,9 @@ import { isServer } from "solid-js/web";
 import { LexoRank } from "lexorank";
 
 const nanoid = () => {
-    const array = new Uint8Array(16);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => ('0' + byte.toString(16)).slice(-2)).join('');
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => ('0' + byte.toString(16)).slice(-2)).join('');
 }
 
 export type Task = {
@@ -21,9 +21,47 @@ export type Task = {
   rank: string;
 };
 
-type TreeNode = Task & {
+export type TreeNode = Task & {
   children: TreeNode[];
   effectiveDueDate: number | null; // Bubbled up date
+};
+
+const compareDueThenRank = (a: Task, b: Task) => {
+  const aDue = a.dueAt ?? Number.POSITIVE_INFINITY;
+  const bDue = b.dueAt ?? Number.POSITIVE_INFINITY;
+  if (aDue !== bDue) return aDue - bDue;
+  return a.rank.localeCompare(b.rank);
+};
+
+const computeInitialRank = (parentId: string | null, dueAt: number | null) => {
+  const siblings = Object.values(state.tasks).filter(t => t.parentId === parentId);
+
+  if (!siblings.length) {
+    return LexoRank.middle().toString();
+  }
+
+  // Insert by due date (nulls last), fall back to rank ordering
+  const sorted = siblings.slice().sort(compareDueThenRank);
+  const targetIndex = sorted.findIndex(sibling => {
+    const siblingDue = sibling.dueAt ?? Number.POSITIVE_INFINITY;
+    const currentDue = dueAt ?? Number.POSITIVE_INFINITY;
+    return currentDue < siblingDue;
+  });
+
+  const insertIndex = targetIndex === -1 ? sorted.length : targetIndex;
+  const prev = sorted[insertIndex - 1];
+  const next = sorted[insertIndex];
+
+  if (!prev && !next) {
+    return LexoRank.middle().toString();
+  }
+  if (!prev && next) {
+    return LexoRank.parse(next.rank).genPrev().toString();
+  }
+  if (prev && !next) {
+    return LexoRank.parse(prev.rank).genNext().toString();
+  }
+  return LexoRank.parse(prev.rank).between(LexoRank.parse(next.rank)).toString();
 };
 
 const doc = new Y.Doc();
@@ -60,91 +98,102 @@ onMount(init);
 export const rawTasks = state.tasks;
 
 export const tasks = createMemo(() => {
-    const tasks = Object.values(state.tasks);
-    const nodeMap = new Map<string, TreeNode>();
+  const tasks = Object.values(state.tasks);
+  const nodeMap = new Map<string, TreeNode>();
 
-    // Initialize nodes
-    tasks.forEach(t => {
-      nodeMap.set(t.id, { ...t, children: [], effectiveDueDate: t.dueAt });
-    });
-
-    const roots: TreeNode[] = [];
-
-    // Build Hierarchy
-    tasks.forEach(t => {
-      const node = nodeMap.get(t.id)!;
-      if (t.parentId && nodeMap.has(t.parentId)) {
-        nodeMap.get(t.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    });
-
-    // Recursive Sort & Bubble Function
-    const processNode = (node: TreeNode): number | null => {
-      // 1. Process children first (Depth First)
-      let minChildDate: number | null = null;
-
-      node.children.forEach(child => {
-        const childDate = processNode(child);
-        
-        // Bubble logic: Find earliest date among children
-        if (childDate !== null) {
-          if (minChildDate === null || childDate < minChildDate) {
-            minChildDate = childDate;
-          }
-        }
-      });
-
-      // 2. Set effective due date (Self vs Children)
-      if (node.dueAt !== null) {
-        node.effectiveDueDate = minChildDate !== null 
-          ? Math.min(node.dueAt, minChildDate) 
-          : node.dueAt;
-      } else {
-        node.effectiveDueDate = minChildDate;
-      }
-
-      // 3. Sort Children
-      // Here is where you decide: Rank vs DueDate
-      node.children.sort((a, b) => {
-        // Example: Always sort by Rank (Manual Drag & Drop)
-        // If you want DueDate sorting, change this logic.
-        return a.rank.localeCompare(b.rank);
-      });
-
-      return node.effectiveDueDate;
-    };
-
-    // Process roots
-    roots.forEach(processNode);
-    
-    // Sort roots
-    roots.sort((a, b) => a.rank.localeCompare(b.rank));
-
-    return roots;
+  // Initialize nodes
+  tasks.forEach(t => {
+    nodeMap.set(t.id, { ...t, children: [], effectiveDueDate: t.dueAt });
   });
 
-export const addTask = (data: {content: string}, parentId: string | null = null) => {
-  doc.transact(() => {
-    const id = nanoid();
-    
-    // Calculate Rank: Put it at the end of the current list
-    // (In a real app, you'd query the last item in this parent group)
-    const rank = LexoRank.middle().toString(); 
+  const roots: TreeNode[] = [];
 
-    const newTask: Task = {
-      id,
-      parentId,
-      text: data.content,
-      completed: false,
-      createdAt: Date.now(),
-      dueAt: data.dueDate,
-      rank,
-    };
-    
+  // Build Hierarchy
+  tasks.forEach(t => {
+    const node = nodeMap.get(t.id)!;
+    if (t.parentId && nodeMap.has(t.parentId)) {
+      nodeMap.get(t.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+
+  // Recursive Sort & Bubble Function
+  const processNode = (node: TreeNode): number | null => {
+    // 1. Process children first (Depth First)
+    let minChildDate: number | null = null;
+
+    node.children.forEach(child => {
+      const childDate = processNode(child);
+
+      // Bubble logic: Find earliest date among children
+      if (childDate !== null) {
+        if (minChildDate === null || childDate < minChildDate) {
+          minChildDate = childDate;
+        }
+      }
+    });
+
+    // 2. Set effective due date (Self vs Children)
+    if (node.dueAt !== null) {
+      node.effectiveDueDate = minChildDate !== null 
+        ? Math.min(node.dueAt, minChildDate) 
+        : node.dueAt;
+    } else {
+      node.effectiveDueDate = minChildDate;
+    }
+
+    // 3. Sort Children
+    // Here is where you decide: Rank vs DueDate
+    node.children.sort((a, b) => {
+      // Example: Always sort by Rank (Manual Drag & Drop)
+      // If you want DueDate sorting, change this logic.
+      return a.rank.localeCompare(b.rank);
+    });
+
+    return node.effectiveDueDate;
+  };
+
+  // Process roots
+  roots.forEach(processNode);
+
+  // Sort roots
+  roots.sort((a, b) => a.rank.localeCompare(b.rank));
+
+  return roots;
+});
+
+type NewTaskPayload = {
+  content: string;
+  dueDate?: string | number | null;
+};
+
+export const addTask = (data: NewTaskPayload, parentId: string | null = null) => {
+  const id = nanoid();
+  const parsedDue = data.dueDate
+    ? typeof data.dueDate === "number"
+      ? data.dueDate
+      : new Date(data.dueDate).getTime()
+    : null;
+  const dueAt = Number.isFinite(parsedDue) ? parsedDue : null;
+
+  const rank = computeInitialRank(parentId, dueAt);
+
+  const newTask: Task = {
+    id,
+    parentId,
+    text: data.content,
+    completed: false,
+    createdAt: Date.now(),
+    dueAt,
+    rank,
+  };
+  doc.transact(() => {
+
     yTasks.set(id, newTask);
   });
+
+  return newTask;
 };
 
 export const updateTask = (id: string, fields: Partial<Task>) => {
@@ -183,5 +232,28 @@ export const moveTask = (
       parentId: newParentId, 
       rank: newRank.toString() 
     });
+  });
+};
+
+export const deleteTask = (id: string) => {
+  doc.transact(() => {
+    if (!yTasks.has(id)) return;
+
+    const snapshot = yTasks.toJSON();
+    const toRemove: string[] = [];
+    const stack = [id];
+
+    while (stack.length) {
+      const currentId = stack.pop()!;
+      toRemove.push(currentId);
+
+      Object.entries(snapshot).forEach(([taskId, task]) => {
+        if (task.parentId === currentId) {
+          stack.push(taskId);
+        }
+      });
+    }
+
+    toRemove.forEach(taskId => yTasks.delete(taskId));
   });
 };

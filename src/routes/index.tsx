@@ -1,6 +1,7 @@
 import { Title } from "@solidjs/meta";
 import TaskPrompt from "~/components/TaskPrompt";
 import TasksList from "~/components/TasksList";
+import { tasks } from "~/stores/taskStore";
 
 export default
 function Home() {
@@ -8,7 +9,7 @@ function Home() {
     <main>
       <Title>Hello World</Title>
       <TaskPrompt />
-      <TasksList fallback={<div>Loading...</div>} />
+      <TasksList tasks={tasks()} fallback={<div>Loading...</div>} />
     </main>
   );
 }
