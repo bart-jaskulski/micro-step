@@ -35,6 +35,13 @@
     align-items: stretch;
   }
 
+  @media (max-width: 640px) {
+    main {
+      flex-direction: column-reverse;
+      min-height: calc(100vh - 2.5rem);
+    }
+  }
+
   button {
     border: none;
     cursor: pointer;
