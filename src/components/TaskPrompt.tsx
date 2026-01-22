@@ -14,26 +14,38 @@ export default function TaskPrompt() {
   const submission = useSubmission(breakdownTask);
   const [clarification, setClarification] = createSignal<string>("");
 
+  const runWithTransition = async (fn: () => void | Promise<void>) => {
+    const startViewTransition = (document as Document & {
+      startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
+    }).startViewTransition;
+
+    if (startViewTransition) {
+      const transition = startViewTransition.call(document, () => fn());
+      await transition.finished;
+      return;
+    }
+
+    await fn();
+  };
+
   createEffect(async () => {
     if (submission.result) {
+      console.log("[client] breakdownTask result", submission.result);
       switch (submission.result.action) {
         case "createTasks":
           const { tasks } = submission.result;
 
           let newTask;
-          let transition = document.startViewTransition(async () => {
-            newTask = addTask({ content: submission.result.title, dueDate: undefined });
-            await transition.finished;
+          await runWithTransition(async () => {
+            newTask = await addTask({ content: submission.result.title, dueDate: undefined });
           });
 
-          console.log(newTask);
+          console.log("[client] root task created", newTask);
+          if (!newTask) return;
           for (const t of tasks) {
-            transition = document.startViewTransition(() => {
-              addTask(t, newTask!.id);
-            });
-
-            await transition.finished;
+            await runWithTransition(() => addTask(t, newTask.id));
           }
+          console.log("[client] subtasks added", tasks.length);
           break;
         case "askClarification":
           setMode("clarify");
@@ -50,7 +62,13 @@ export default function TaskPrompt() {
   let textareaRef: HTMLTextAreaElement | undefined;
 
   return (
-    <form action={breakdownTask} method="post">
+    <form
+      action={breakdownTask}
+      method="post"
+      onSubmit={() => {
+        console.log("[client] submitting breakdownTask", { granularity: granularity() });
+      }}
+    >
       <input type="hidden" name="granularity" value={granularity()} />
       <div class='task-prompt'>
         <div class="grow-wrap">

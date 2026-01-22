@@ -1,6 +1,10 @@
 // Convert raw key string (from URL) to CryptoKey
 export const importKey = async (rawKey: string): Promise<CryptoKey> => {
-  const keyBuffer = Uint8Array.from(atob(rawKey), c => c.charCodeAt(0));
+  const binaryString = atob(rawKey);
+  const keyBuffer = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    keyBuffer[i] = binaryString.charCodeAt(i);
+  }
   return window.crypto.subtle.importKey(
     "raw", keyBuffer, "AES-GCM", true, ["encrypt", "decrypt"]
   );
@@ -12,7 +16,9 @@ export const generateKey = async (): Promise<string> => {
     { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]
   );
   const exported = await window.crypto.subtle.exportKey("raw", key);
-  return btoa(String.fromCharCode(...new Uint8Array(exported)));
+  const exportedBytes = new Uint8Array(exported);
+  const binaryString = Array.from(exportedBytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binaryString);
 };
 
 export const encryptData = async (key: CryptoKey, data: Uint8Array): Promise<Uint8Array> => {
@@ -35,4 +41,21 @@ export const decryptData = async (key: CryptoKey, data: Uint8Array): Promise<Uin
   return new Uint8Array(await window.crypto.subtle.decrypt(
     { name: "AES-GCM", iv }, key, ciphertext
   ));
+};
+
+// Vault key management for device pairing
+export const generateVaultKey = async (): Promise<string> => {
+  return generateKey();
+};
+
+export const hashVaultKeyToPath = async (vaultKeyBase64: string): Promise<string> => {
+  const binaryString = atob(vaultKeyBase64);
+  const keyBuffer = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    keyBuffer[i] = binaryString.charCodeAt(i);
+  }
+  const hashBuffer = await window.crypto.subtle.digest("SHA-256", keyBuffer);
+  const hashArray = new Uint8Array(hashBuffer);
+  const hashBinaryString = Array.from(hashArray, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(hashBinaryString);
 }; 
