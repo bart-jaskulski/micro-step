@@ -197,7 +197,7 @@ function TaskNode(props: TaskNodeProps) {
       </div>
 
       <Show when={hasChildren()}>
-        <div class="node-children">
+        <div class="node-children-wrapper">
           <div aria-hidden="true" class="spine-line" />
           <button
             type="button"
@@ -208,14 +208,16 @@ function TaskNode(props: TaskNodeProps) {
           >
             <Minus />
           </button>
-          <div class="node-children-inner">
-            <TaskBranch
-              tasks={props.node.children}
-              level={(props.level ?? 0) + 1}
-              defaultExpanded={props.defaultExpanded}
-              expansion={props.expansion}
-              fallback={props.fallback}
-            />
+          <div class="node-children-animator">
+            <div class="node-children-inner">
+              <TaskBranch
+                tasks={props.node.children}
+                level={(props.level ?? 0) + 1}
+                defaultExpanded={props.defaultExpanded}
+                expansion={props.expansion}
+                fallback={props.fallback}
+              />
+            </div>
           </div>
         </div>
       </Show>

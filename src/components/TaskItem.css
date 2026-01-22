@@ -31,6 +31,8 @@ border-color: color-mix(in srgb, var(--accent, #1a9bb2) 25%, var(--border-subtle
     cursor: grab;
     touch-action: none;
     user-select: none;
+    display: grid;
+    place-items: center;
   }
 
   :has(input[type="checkbox"]:checked) {
