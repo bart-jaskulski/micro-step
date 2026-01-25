@@ -8,8 +8,8 @@ function Home() {
   return (
     <main>
       <Title>Hello World</Title>
-      <TaskPrompt />
       <TasksList tasks={tasks()} fallback={<div>Loading...</div>} />
+      <TaskPrompt />
     </main>
   );
 }

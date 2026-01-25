@@ -59,7 +59,8 @@ export const initSchema = async () => {
       created_at INTEGER NOT NULL DEFAULT 0,
       due_at INTEGER,
       rank TEXT NOT NULL DEFAULT '',
-      site_id BLOB
+      site_id BLOB,
+      is_deleted INTEGER NOT NULL DEFAULT 0
     );
 
     SELECT crsql_as_crr('tasks');
@@ -73,6 +74,17 @@ export const initSchema = async () => {
     console.log("Database initialized with empty tasks table");
   } else {
     console.log("Database schema already initialized");
+  }
+
+  const columns = await database.execO(`
+    PRAGMA table_info(tasks);
+  `);
+
+  const hasIsDeleted = columns.some((col: any) => col.name === 'is_deleted');
+
+  if (!hasIsDeleted) {
+    database.exec("ALTER TABLE tasks ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0");
+    console.log("Added is_deleted column to existing tasks table");
   }
 };
 

@@ -3,6 +3,20 @@
   width: 100%;
 }
 
+.task-prompt-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 1.25rem;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.task-prompt-shell > * {
+  pointer-events: auto;
+}
+
 .grow-wrap::after {
   content: attr(data-replicated-value) " ";
   white-space: pre-wrap;

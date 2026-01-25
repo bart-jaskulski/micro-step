@@ -1,8 +1,9 @@
-import { createMemo, createRoot } from "solid-js";
+import { createMemo, createRoot, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import { isServer } from "solid-js/web";
 import { LexoRank } from "lexorank";
 import { getDb, initSchema } from "~/lib/db";
+import tblrx from "@vlcn.io/rx-tbl";
 
 const nanoid = () => {
   const array = new Uint8Array(16);
@@ -19,6 +20,7 @@ export type Task = {
   createdAt: number;
   dueAt: number | null;
   rank: string;
+  isDeleted: boolean;
 };
 
 export type TreeNode = Task & {
@@ -34,6 +36,7 @@ const dbRowToTask = (row: any): Task => ({
   createdAt: row.created_at,
   dueAt: row.due_at,
   rank: row.rank,
+  isDeleted: Boolean(row.is_deleted),
 });
 
 const compareDueThenRank = (a: Task, b: Task) => {
@@ -48,9 +51,9 @@ const computeInitialRank = async (parentId: string | null, dueAt: number | null)
   
   let rows: any[];
   if (parentId) {
-    rows = await db.execO("SELECT * FROM tasks WHERE parent_id = ?", [parentId]);
+    rows = await db.execO("SELECT * FROM tasks WHERE parent_id = ? AND is_deleted = 0", [parentId]);
   } else {
-    rows = await db.execO("SELECT * FROM tasks WHERE parent_id IS NULL");
+    rows = await db.execO("SELECT * FROM tasks WHERE parent_id IS NULL AND is_deleted = 0");
   }
 
   if (!rows || !Array.isArray(rows) || rows.length === 0) {
@@ -88,9 +91,11 @@ const taskStore = createRoot(() => {
     isSynced: false,
   });
 
+  let rxDisposer: (() => void) | null = null;
+
   const refreshTasks = async () => {
     const db = await getDb();
-    const rows = await db.execO("SELECT * FROM tasks");
+    const rows = await db.execO("SELECT * FROM tasks WHERE is_deleted = 0");
     console.log("[client] refreshTasks - fetched rows", rows);
     const taskMap: Record<string, Task> = {};
     
@@ -105,12 +110,35 @@ const taskStore = createRoot(() => {
     console.log("[client] refreshTasks", { count: Object.keys(taskMap).length });
   };
 
+  const setupReactiveQueries = async () => {
+    if (isServer || rxDisposer) return;
+
+    const db = await getDb();
+    const rx = tblrx(db);
+
+    rxDisposer = rx.onRange(["tasks"], (updateTypes) => {
+      console.log("[client] Reactive update triggered for tasks table", updateTypes);
+      void refreshTasks();
+    });
+
+    console.log("[client] Reactive queries setup complete");
+  };
+
+  const cleanupReactiveQueries = () => {
+    if (rxDisposer) {
+      rxDisposer();
+      rxDisposer = null;
+      console.log("[client] Reactive queries cleaned up");
+    }
+  };
+
   const initializeTaskStore = async () => {
     if (isServer) return;
 
     try {
       await initSchema();
       await refreshTasks();
+      await setupReactiveQueries();
       setState("isSynced", true);
     } catch (err) {
       console.error("Failed to initialize task store:", err);
@@ -171,12 +199,12 @@ const taskStore = createRoot(() => {
     return roots;
   });
 
-  return { state, setState, refreshTasks, initializeTaskStore, tasks };
+  return { state, setState, refreshTasks, initializeTaskStore, tasks, cleanupReactiveQueries };
 });
 
-const { state, setState, refreshTasks, initializeTaskStore, tasks } = taskStore;
+const { state, setState, refreshTasks, initializeTaskStore, tasks, cleanupReactiveQueries } = taskStore;
 
-export { initializeTaskStore, tasks };
+export { initializeTaskStore, tasks, cleanupReactiveQueries };
 
 export const rawTasks = state.tasks;
 
@@ -199,11 +227,9 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
   const db = await getDb();
   
   db.exec(
-    "INSERT INTO tasks (id, parent_id, text, completed, created_at, due_at, rank) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [id, parentId, data.content, 0, Date.now(), dueAt, rank]
+    "INSERT INTO tasks (id, parent_id, text, completed, created_at, due_at, rank, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, parentId, data.content, 0, Date.now(), dueAt, rank, 0]
   );
-
-  await refreshTasks();
 
   const newTask: Task = {
     id,
@@ -213,6 +239,7 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
     createdAt: Date.now(),
     dueAt,
     rank,
+    isDeleted: false,
   };
 
   console.log("[client] addTask", { id, parentId, text: data.content });
@@ -250,11 +277,14 @@ export const updateTask = async (id: string, fields: Partial<Task>) => {
     updates.push("rank = ?");
     values.push(fields.rank);
   }
+  if (fields.isDeleted !== undefined) {
+    updates.push("is_deleted = ?");
+    values.push(fields.isDeleted ? 1 : 0);
+  }
 
   if (updates.length) {
     values.push(id);
     db.exec(`UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`, values);
-    await refreshTasks();
   }
 };
 
@@ -265,7 +295,7 @@ export const moveTask = async (
   nextSiblingRank?: string
 ) => {
   const db = await getDb();
-  const rows = await db.execO("SELECT * FROM tasks WHERE id = ?", [taskId]);
+  const rows = await db.execO("SELECT * FROM tasks WHERE id = ? AND is_deleted = 0", [taskId]);
   
   if (!rows || !Array.isArray(rows) || rows.length === 0) return;
 
@@ -286,8 +316,6 @@ export const moveTask = async (
     "UPDATE tasks SET parent_id = ?, rank = ? WHERE id = ?",
     [newParentId, newRank, taskId]
   );
-
-  await refreshTasks();
 };
 
 export const deleteTask = async (id: string) => {
@@ -298,7 +326,7 @@ export const deleteTask = async (id: string) => {
 
   while (found) {
     found = false;
-    const rows = db.exec("SELECT * FROM tasks");
+    const rows = await db.execO("SELECT * FROM tasks WHERE is_deleted = 0");
     if (Array.isArray(rows)) {
       rows.forEach((row: any) => {
         if (toRemove.includes(row.parent_id) && !toRemove.includes(row.id)) {
@@ -310,8 +338,6 @@ export const deleteTask = async (id: string) => {
   }
 
   toRemove.forEach(taskId => {
-    db.exec("DELETE FROM tasks WHERE id = ?", [taskId]);
+    db.exec("UPDATE tasks SET is_deleted = 1 WHERE id = ?", [taskId]);
   });
-
-  await refreshTasks();
 };

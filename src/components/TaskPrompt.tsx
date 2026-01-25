@@ -59,12 +59,37 @@ export default function TaskPrompt() {
 
   const [granularityMenuOpen, setGranularityMenuOpen] = createSignal(false);
   const [granularity, setGranularity] = createSignal<Granularity>("medium");
+  const [isComposing, setIsComposing] = createSignal(false);
   let textareaRef: HTMLTextAreaElement | undefined;
+  let clarifyTextareaRef: HTMLTextAreaElement | undefined;
+
+  const handleKeyDown = (e: KeyboardEvent, formRef: HTMLFormElement | undefined) => {
+    if (e.key === "Enter") {
+      if (isComposing() || (e as any).nativeEvent?.isComposing) {
+        return;
+      }
+      if (e.shiftKey) {
+        return;
+      }
+      e.preventDefault();
+
+      const form = formRef || (e.currentTarget as HTMLTextAreaElement).form;
+      const submitButton = form?.querySelector(
+        'button[type="submit"]'
+      ) as HTMLButtonElement | null;
+      if (submitButton?.disabled) {
+        return;
+      }
+
+      form?.requestSubmit();
+    }
+  };
 
   return (
     <form
       action={breakdownTask}
       method="post"
+      class="task-prompt-shell"
       onSubmit={() => {
         console.log("[client] submitting breakdownTask", { granularity: granularity() });
       }}
@@ -72,7 +97,17 @@ export default function TaskPrompt() {
       <input type="hidden" name="granularity" value={granularity()} />
       <div class='task-prompt'>
         <div class="grow-wrap">
-          <textarea class={mode()} ref={textareaRef} name="task" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
+          <textarea 
+            class={mode()} 
+            ref={textareaRef} 
+            name="task" 
+            rows={2} 
+            onInput={function () { (this.parentNode as HTMLElement).dataset.replicatedValue = this.value}} 
+            onKeyDown={(e) => handleKeyDown(e, undefined)}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            spellcheck="false"
+          ></textarea>
         </div>
         <Show when={mode() === "default"}>
           <div class='task-prompt__bottom'>
@@ -111,7 +146,16 @@ export default function TaskPrompt() {
         </output>
         <div class='task-prompt clarification-form'>
           <div class="grow-wrap">
-            <textarea name="clarification" rows={2} onInput={function () { this.parentNode.dataset.replicatedValue = this.value}} spellcheck="false"></textarea>
+            <textarea 
+              name="clarification" 
+              ref={clarifyTextareaRef}
+              rows={2} 
+              onInput={function () { (this.parentNode as HTMLElement).dataset.replicatedValue = this.value}} 
+              onKeyDown={(e) => handleKeyDown(e, undefined)}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
+              spellcheck="false"
+            ></textarea>
           </div>
           <div class='task-prompt__bottom'>
             <button type="submit"><ArrowUp/></button>
