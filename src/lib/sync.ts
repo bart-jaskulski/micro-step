@@ -1,13 +1,12 @@
 import { createStore, produce } from "solid-js/store";
-import { getDb } from "~/lib/db";
+import { exec, query, exportDb, importDb } from "~/lib/db";
 import { importKey, encryptData, decryptData } from "~/lib/crypto";
 import { vaultState } from "~/stores/vaultStore";
-import { generateUploadUrl, listChangesets } from "~/actions/syncActions";
 
 type SyncStatus = "idle" | "syncing" | "error";
 
 const SYNC_IDB_NAME = "sync_store";
-const SYNC_IDB_VERSION = 1;
+const SYNC_IDB_VERSION = 2;
 
 let idb: IDBDatabase | null = null;
 
@@ -22,6 +21,9 @@ const initSyncIndexedDB = (): Promise<IDBDatabase> => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains("sync")) {
         db.createObjectStore("sync", { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains("syncQueue")) {
+        db.createObjectStore("syncQueue", { keyPath: "id", autoIncrement: true });
       }
     };
   });
@@ -60,6 +62,60 @@ const getSyncIDBValue = async <T = any>(key: string): Promise<T | null> => {
   });
 };
 
+type SyncQueueItem = {
+  id?: number;
+  vaultPath: string;
+  deviceId: string;
+  payload: Uint8Array;
+  timestamp: number;
+};
+
+const addToSyncQueue = async (item: Omit<SyncQueueItem, "id">): Promise<void> => {
+  if (!idb) idb = await initSyncIndexedDB();
+  return new Promise((resolve, reject) => {
+    const tx = idb!.transaction("syncQueue", "readwrite");
+    const store = tx.objectStore("syncQueue");
+    const request = store.add(item);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const getSyncQueue = async (): Promise<SyncQueueItem[]> => {
+  if (!idb) idb = await initSyncIndexedDB();
+  return new Promise((resolve, reject) => {
+    const tx = idb!.transaction("syncQueue", "readonly");
+    const store = tx.objectStore("syncQueue");
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const removeFromSyncQueue = async (id: number): Promise<void> => {
+  if (!idb) idb = await initSyncIndexedDB();
+  return new Promise((resolve, reject) => {
+    const tx = idb!.transaction("syncQueue", "readwrite");
+    const store = tx.objectStore("syncQueue");
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const registerBackgroundSync = async (): Promise<void> => {
+  if (!navigator.onLine && "serviceWorker" in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if ("sync" in reg) {
+        await (reg as any).sync.register("sync-tasks");
+      }
+    } catch (err) {
+      console.warn("Background sync registration failed:", err);
+    }
+  }
+};
+
 type SyncState = {
   status: SyncStatus;
   lastSyncTimestamp: number | null;
@@ -74,8 +130,7 @@ const [syncState, setSyncState] = createStore<SyncState>({
 
 const hasCrsqlFunction = async (name: string): Promise<boolean> => {
   try {
-    const db = await getDb();
-    const result = await db.execO("SELECT name FROM pragma_function_list WHERE name = ?", [name]);
+    const result = await query("SELECT name FROM pragma_function_list WHERE name = ?", [name]);
     return Array.isArray(result) && result.length > 0;
   } catch (err) {
     console.warn(`Failed to check for ${name}:`, err);
@@ -85,13 +140,12 @@ const hasCrsqlFunction = async (name: string): Promise<boolean> => {
 
 const generateChangeset = async (): Promise<Uint8Array | null> => {
   try {
-    const db = await getDb();
     const hasChangeset = await hasCrsqlFunction("crsql_changeset");
     if (!hasChangeset) {
       return null;
     }
-    const result = await db.execO("SELECT crsql_changeset() as changeset");
-    const changeset = Array.isArray(result) ? result[0]?.changeset : result?.changeset;
+    const result = await query<any>("SELECT crsql_changeset() as changeset");
+    const changeset = Array.isArray(result) ? result[0]?.changeset : null;
     if (changeset) {
       return new Uint8Array(changeset);
     }
@@ -114,14 +168,12 @@ const uploadChangeset = async (
   const cryptoKey = await importKey(vaultState.vaultKey);
   const encrypted = await encryptData(cryptoKey, changeset);
 
-  const { url } = await generateUploadUrl(
-    vaultState.vaultPath,
-    vaultState.deviceId,
-    timestamp
-  );
-
-  const response = await fetch(url, {
-    method: "PUT",
+  const response = await fetch("/api/sync/upload", {
+    method: "POST",
+    headers: {
+      "X-Vault-Path": vaultState.vaultPath,
+      "X-Device-Id": vaultState.deviceId,
+    },
     body: encrypted.slice(0),
   });
 
@@ -137,10 +189,47 @@ const downloadAndApplyChangesets = async (): Promise<void> => {
   }
 
   const lastSync = await getSyncIDBValue<number>("lastSyncTimestamp");
-  const changesets = await listChangesets(
-    vaultState.vaultPath,
-    lastSync || undefined
-  );
+
+  // If no prior sync, try bootstrapping from a snapshot
+  if (!lastSync) {
+    try {
+      const result = await downloadLatestSnapshot();
+      if (result) {
+        await applySnapshot(result.snapshot);
+        await setSyncIDBValue("lastSyncTimestamp", result.timestamp);
+        setSyncState("lastSyncTimestamp", result.timestamp);
+
+        // Download changesets after snapshot with 1s buffer
+        const afterTimestamp = result.timestamp - 1000;
+        await downloadChangesetsAfter(afterTimestamp);
+        return;
+      }
+    } catch (err) {
+      console.error("Snapshot bootstrap failed, falling back to changesets:", err);
+    }
+  }
+
+  await downloadChangesetsAfter(lastSync);
+};
+
+const downloadChangesetsAfter = async (after: number | null): Promise<void> => {
+  if (!vaultState.vaultPath || !vaultState.vaultKey) return;
+
+  const listUrl = new URL("/api/sync/list", window.location.origin);
+  listUrl.searchParams.set("vaultPath", vaultState.vaultPath);
+  if (after) {
+    listUrl.searchParams.set("after", String(after));
+  }
+
+  const listResponse = await fetch(listUrl);
+  if (!listResponse.ok) {
+    console.error(`Failed to list changesets: ${listResponse.status}`);
+    return;
+  }
+
+  const { changesets } = (await listResponse.json()) as {
+    changesets: Array<{ key: string; timestamp: number }>;
+  };
 
   if (changesets.length === 0) {
     console.log("No new changesets to download");
@@ -148,16 +237,10 @@ const downloadAndApplyChangesets = async (): Promise<void> => {
   }
 
   const cryptoKey = await importKey(vaultState.vaultKey);
-  const db = await getDb();
-  const hasApplyChangeset = await hasCrsqlFunction("crsql_apply_changeset");
-  if (!hasApplyChangeset) {
-    console.warn("Skipping changeset apply: crsql_apply_changeset not available");
-    return;
-  }
 
   for (const changeset of changesets) {
     try {
-      const response = await fetch(changeset.url);
+      const response = await fetch(`/api/sync/download/${changeset.key}`);
       if (!response.ok) {
         console.error(`Failed to download ${changeset.key}: ${response.status}`);
         continue;
@@ -166,13 +249,12 @@ const downloadAndApplyChangesets = async (): Promise<void> => {
       const encrypted = await response.arrayBuffer();
       const decrypted = await decryptData(cryptoKey, new Uint8Array(encrypted));
 
-      db.exec("SELECT crsql_apply_changeset(?)", [new Uint8Array(decrypted).buffer]);
+      await exec("SELECT crsql_apply_changeset(?)", [new Uint8Array(decrypted).buffer]);
 
-      const timestamp = changeset.lastModified.getTime();
-      await setSyncIDBValue("lastSyncTimestamp", timestamp);
+      await setSyncIDBValue("lastSyncTimestamp", changeset.timestamp);
       
-      if (timestamp > (syncState.lastSyncTimestamp || 0)) {
-        setSyncState("lastSyncTimestamp", timestamp);
+      if (changeset.timestamp > (syncState.lastSyncTimestamp || 0)) {
+        setSyncState("lastSyncTimestamp", changeset.timestamp);
       }
     } catch (err) {
       console.error(`Failed to apply changeset ${changeset.key}:`, err);
@@ -198,8 +280,25 @@ export const syncNow = async (): Promise<void> => {
         await uploadChangeset(changeset, timestamp);
         await setSyncIDBValue("lastSyncTimestamp", timestamp);
         setSyncState("lastSyncTimestamp", timestamp);
+        await incrementChangesetCounter();
+
+        // Check if we should create a snapshot after threshold
+        if (await shouldCreateSnapshotByThreshold()) {
+          await createAndUploadSnapshot();
+        }
       } catch (uploadErr) {
         console.error("Upload failed, queuing for retry:", uploadErr);
+
+        const cryptoKey = await importKey(vaultState.vaultKey!);
+        const encrypted = await encryptData(cryptoKey, changeset);
+        await addToSyncQueue({
+          vaultPath: vaultState.vaultPath!,
+          deviceId: vaultState.deviceId!,
+          payload: encrypted,
+          timestamp,
+        });
+        await registerBackgroundSync();
+
         setSyncState(
           produce((draft) => {
             draft.offlineQueue.push({ changeset, timestamp });
@@ -215,6 +314,7 @@ export const syncNow = async (): Promise<void> => {
         try {
           await uploadChangeset(item.changeset, item.timestamp);
           await setSyncIDBValue("lastSyncTimestamp", item.timestamp);
+          await incrementChangesetCounter();
           
           setSyncState(
             produce((draft) => {
@@ -226,6 +326,28 @@ export const syncNow = async (): Promise<void> => {
         } catch (err) {
           console.error(`Retry failed for timestamp ${item.timestamp}:`, err);
         }
+      }
+    }
+
+    // Process persisted IDB queue (survives app restart)
+    const idbQueue = await getSyncQueue();
+    for (const item of idbQueue) {
+      try {
+        const response = await fetch("/api/sync/upload", {
+          method: "POST",
+          headers: {
+            "X-Vault-Path": item.vaultPath,
+            "X-Device-Id": item.deviceId,
+          },
+          body: item.payload.slice(0),
+        });
+        if (response.ok) {
+          await removeFromSyncQueue(item.id!);
+          await setSyncIDBValue("lastSyncTimestamp", item.timestamp);
+          await incrementChangesetCounter();
+        }
+      } catch (err) {
+        console.error(`IDB queue retry failed for id ${item.id}:`, err);
       }
     }
   } catch (err) {
@@ -241,11 +363,157 @@ export const syncNow = async (): Promise<void> => {
 
 export const syncStateStore = syncState;
 
+// --- Snapshot Logic ---
+
+const SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SNAPSHOT_CHANGESET_THRESHOLD = 100;
+
+const generateSnapshot = async (): Promise<Uint8Array | null> => {
+  try {
+    const bytes = await exportDb();
+    return bytes && bytes.byteLength > 0 ? bytes : null;
+  } catch (err) {
+    console.error("Failed to generate snapshot:", err);
+    return null;
+  }
+};
+
+const uploadSnapshot = async (snapshot: Uint8Array): Promise<void> => {
+  if (!vaultState.vaultPath || !vaultState.deviceId || !vaultState.vaultKey) {
+    throw new Error("Vault not configured for sync");
+  }
+
+  const cryptoKey = await importKey(vaultState.vaultKey);
+  const encrypted = await encryptData(cryptoKey, snapshot);
+
+  const response = await fetch("/api/sync/snapshots/upload", {
+    method: "POST",
+    headers: {
+      "X-Vault-Path": vaultState.vaultPath,
+      "X-Device-Id": vaultState.deviceId,
+    },
+    body: encrypted.slice(0),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Snapshot upload failed: ${response.status}`);
+  }
+};
+
+const shouldCreateSnapshot = async (): Promise<boolean> => {
+  const lastSnapshotTimestamp = await getSyncIDBValue<number>("lastSnapshotTimestamp");
+  const changesetsSinceSnapshot = await getSyncIDBValue<number>("changesetsSinceSnapshot") ?? 0;
+
+  if (lastSnapshotTimestamp && Date.now() - lastSnapshotTimestamp < SNAPSHOT_INTERVAL_MS) {
+    return false;
+  }
+
+  // Must have at least one uploaded changeset since last snapshot
+  if (changesetsSinceSnapshot === 0) {
+    return false;
+  }
+
+  return true;
+};
+
+const shouldCreateSnapshotByThreshold = async (): Promise<boolean> => {
+  const lastSnapshotTimestamp = await getSyncIDBValue<number>("lastSnapshotTimestamp");
+
+  if (lastSnapshotTimestamp && Date.now() - lastSnapshotTimestamp < SNAPSHOT_INTERVAL_MS) {
+    return false;
+  }
+
+  const changesetsSinceSnapshot = await getSyncIDBValue<number>("changesetsSinceSnapshot") ?? 0;
+  return changesetsSinceSnapshot >= SNAPSHOT_CHANGESET_THRESHOLD;
+};
+
+const createAndUploadSnapshot = async (): Promise<void> => {
+  const snapshot = await generateSnapshot();
+  if (!snapshot) return;
+
+  await uploadSnapshot(snapshot);
+  await setSyncIDBValue("lastSnapshotTimestamp", Date.now());
+  await setSyncIDBValue("changesetsSinceSnapshot", 0);
+};
+
+export const incrementChangesetCounter = async (): Promise<void> => {
+  const current = await getSyncIDBValue<number>("changesetsSinceSnapshot") ?? 0;
+  await setSyncIDBValue("changesetsSinceSnapshot", current + 1);
+};
+
+const downloadLatestSnapshot = async (): Promise<{ snapshot: Uint8Array; timestamp: number } | null> => {
+  if (!vaultState.vaultPath || !vaultState.vaultKey) return null;
+
+  const listUrl = new URL("/api/sync/snapshots/list", window.location.origin);
+  listUrl.searchParams.set("vaultPath", vaultState.vaultPath);
+
+  const listResponse = await fetch(listUrl);
+  if (!listResponse.ok) return null;
+
+  const { snapshots } = (await listResponse.json()) as {
+    snapshots: Array<{ key: string; timestamp: number }>;
+  };
+
+  if (snapshots.length === 0) return null;
+
+  // Latest snapshot is last (sorted ascending by timestamp)
+  const latest = snapshots[snapshots.length - 1];
+  const response = await fetch(`/api/sync/snapshots/download/${latest.key}`);
+  if (!response.ok) return null;
+
+  const cryptoKey = await importKey(vaultState.vaultKey);
+  const encrypted = await response.arrayBuffer();
+  const decrypted = await decryptData(cryptoKey, new Uint8Array(encrypted));
+
+  return { snapshot: new Uint8Array(decrypted), timestamp: latest.timestamp };
+};
+
+const applySnapshot = async (snapshot: Uint8Array): Promise<void> => {
+  await importDb(snapshot.buffer as ArrayBuffer);
+};
+
+let wasOfflineWhileHidden = false;
+
+const setupVisibilityListener = () => {
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "hidden") {
+      if (!navigator.onLine) {
+        wasOfflineWhileHidden = true;
+      }
+      if (!vaultState.isPaired) return;
+      try {
+        if (await shouldCreateSnapshot()) {
+          await createAndUploadSnapshot();
+        }
+      } catch (err) {
+        console.error("Failed to create snapshot on visibility change:", err);
+      }
+      return;
+    }
+
+    // Becoming visible: fallback sync if was offline while hidden
+    if (wasOfflineWhileHidden && navigator.onLine && vaultState.isPaired) {
+      wasOfflineWhileHidden = false;
+      syncNow();
+    }
+  });
+};
+
+const setupOnlineListener = () => {
+  window.addEventListener("online", () => {
+    if (vaultState.isPaired) {
+      syncNow();
+    }
+  });
+};
+
 export const initializeSync = async () => {
   const lastSync = await getSyncIDBValue<number>("lastSyncTimestamp");
   if (lastSync) {
     setSyncState("lastSyncTimestamp", lastSync);
   }
 
+  setupVisibilityListener();
+  setupOnlineListener();
   await syncNow();
 };

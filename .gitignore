@@ -23,6 +23,10 @@ app.config.timestamp_*.js
 # Temp
 gitignore
 
+# Sync storage
+/storage/vaults/*
+!/storage/vaults/.gitkeep
+
 # System Files
 .DS_Store
 Thumbs.db

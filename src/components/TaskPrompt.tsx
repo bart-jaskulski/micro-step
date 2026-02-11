@@ -5,6 +5,7 @@ import ScissorsLineDashed from "lucide-solid/icons/scissors-line-dashed"
 import Checked from "lucide-solid/icons/check"
 import { addTask } from "~/stores/taskStore"
 import { breakdownTask } from "~/actions/taskActions"
+import { isOnline } from "~/stores/networkStore"
 import "./TaskPrompt.css"
 
 type Granularity = "low" | "medium" | "high"
@@ -100,7 +101,7 @@ export default function TaskPrompt() {
                 </div>
               </Show>
             </div>
-            <button type="submit"><ArrowUp/></button>
+            <button type="submit" disabled={!isOnline()}><ArrowUp/></button>
           </div>
         </Show>
       </div>

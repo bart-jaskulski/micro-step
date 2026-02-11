@@ -2,6 +2,7 @@ import { Component, createSignal } from "solid-js";
 import { A } from "@solidjs/router";
 import { vaultState } from "~/stores/vaultStore";
 import { syncStateStore, syncNow } from "~/lib/sync";
+import { isOnline } from "~/stores/networkStore";
 
 export default function SettingsPage() {
   const [isSyncing, setIsSyncing] = createSignal(false);
@@ -91,7 +92,7 @@ export default function SettingsPage() {
               type="button" 
               class="settings-button sync-button"
               onClick={handleSyncNow}
-              disabled={isSyncing()}
+              disabled={isSyncing() || !isOnline()}
             >
               {isSyncing() ? "Syncing..." : "Sync Now"}
             </button>

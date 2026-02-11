@@ -1,5 +1,19 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
-import { getDb } from "./db";
+import { exec, query } from "./db";
+
+export const MAIN_VIEW_QUERY = `
+SELECT *,
+  CASE
+    WHEN updated_at = created_at
+     AND created_at < (strftime('%s', 'now') * 1000 - 7*24*60*60*1000)
+    THEN 1
+    ELSE 0
+  END as is_stalled
+FROM tasks
+ORDER BY completed ASC, is_stalled DESC, parent_id ASC, rank ASC
+`;
+
+export const fetchMainViewTasks = <T = any>(): Promise<T[]> => query<T>(MAIN_VIEW_QUERY);
 
 type QueryCallback = () => any;
 
@@ -52,8 +66,7 @@ export const createLiveQuery = <T = any>(sql: string, params: any[] = []) => {
 
   const executeQuery = async () => {
     try {
-      const db = await getDb();
-      const result = db.exec(sql, params);
+      const result = await query<T>(sql, params);
       setData(result);
     } catch (err) {
       console.error("Live query error:", err);

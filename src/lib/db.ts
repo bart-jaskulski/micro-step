@@ -1,85 +1,98 @@
-import initWasm from "@vlcn.io/crsqlite-wasm";
+import { createSignal } from "solid-js";
 import { isServer } from "solid-js/web";
+import type { DbRequest, DbRequestBody, DbResponse } from "./db.types";
 
-type DB = any;
+let worker: Worker | null = null;
+let nextId = 1;
+let isReady = false;
 
-let db: DB | null = null;
-let initPromise: Promise<DB> | null = null;
+const pending = new Map<number, { resolve: (data: any) => void; reject: (err: Error) => void }>();
+const queue: Array<{ msg: DbRequest; resolve: (data: any) => void; reject: (err: Error) => void }> = [];
 
-const isOpfsSupported = () => {
-  return !isServer && 'showOpenFilePicker' in window;
+const [dbVersion, setDbVersion] = createSignal(0);
+
+const handleMessage = (event: MessageEvent<DbResponse>) => {
+  const msg = event.data;
+
+  if (msg.type === 'change') {
+    setDbVersion(v => v + 1);
+    return;
+  }
+
+  const handler = pending.get(msg.id);
+  if (!handler) return;
+  pending.delete(msg.id);
+
+  if (msg.type === 'error') {
+    handler.reject(new Error(msg.message));
+  } else {
+    handler.resolve(msg.data);
+  }
 };
 
-const initializeDb = async (): Promise<DB> => {
+const postAndWait = <T = any>(msg: DbRequestBody): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    const fullMsg = { ...msg, id } as DbRequest;
+
+    if (!isReady && msg.type !== 'init') {
+      queue.push({ msg: fullMsg, resolve, reject });
+      return;
+    }
+
+    pending.set(id, { resolve, reject });
+    worker!.postMessage(fullMsg);
+  });
+};
+
+const flushQueue = () => {
+  isReady = true;
+  while (queue.length > 0) {
+    const { msg, resolve, reject } = queue.shift()!;
+    pending.set(msg.id, { resolve, reject });
+    worker!.postMessage(msg);
+  }
+};
+
+export const initDb = async (): Promise<void> => {
   if (isServer) {
     throw new Error("Database cannot be initialized on the server");
   }
 
-  if (db) return db;
-  if (initPromise) return initPromise;
+  if (worker) return;
 
-  initPromise = (async () => {
-    try {
-      const sqlite = await initWasm();
+  worker = new Worker(new URL('../workers/db.worker.ts', import.meta.url), {
+    type: 'module',
+  });
 
-      if (isOpfsSupported()) {
-        console.log("Using OPFS for database storage");
-        db = sqlite.open("microstep.db");
-      } else {
-        console.log("OPFS not supported; falling back to IndexedDB storage");
-        db = sqlite.open("microstep.db");
-      }
+  worker.onmessage = handleMessage;
 
-      return db as DB;
-    } catch (err) {
-      initPromise = null;
-      throw err;
-    }
-  })();
-
-  return initPromise;
+  await postAndWait({ type: 'init' });
+  flushQueue();
 };
 
-export const getDb = async () => {
-  if (!db) {
-    await initializeDb();
-  }
-  return db;
+export const exec = (sql: string, params?: any[]): Promise<void> => {
+  return postAndWait({ type: 'exec', sql, params });
 };
 
-export const initSchema = async () => {
-  const database = await getDb();
-  
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT NOT NULL PRIMARY KEY DEFAULT '',
-      parent_id TEXT,
-      text TEXT NOT NULL DEFAULT '',
-      completed INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT 0,
-      due_at INTEGER,
-      rank TEXT NOT NULL DEFAULT '',
-      site_id BLOB
-    );
-
-    SELECT crsql_as_crr('tasks');
-  `);
-
-  const tables = await database.execO(`
-    SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'crsql_%';
-  `);
-
-  if (tables.length === 0) {
-    console.log("Database initialized with empty tasks table");
-  } else {
-    console.log("Database schema already initialized");
-  }
+export const query = <T = any>(sql: string, params?: any[]): Promise<T[]> => {
+  return postAndWait<{ rows: T[] }>({ type: 'query', sql, params }).then(data => data?.rows ?? []);
 };
+
+export const exportDb = (): Promise<Uint8Array> => {
+  return postAndWait<{ bytes: Uint8Array }>({ type: 'export' }).then(data => data.bytes);
+};
+
+export const importDb = (data: ArrayBuffer): Promise<void> => {
+  return postAndWait({ type: 'import', data });
+};
+
+export { dbVersion };
 
 export const closeDb = () => {
-  if (db) {
-    db.close();
-    db = null;
-    initPromise = null;
+  if (worker) {
+    worker.terminate();
+    worker = null;
+    isReady = false;
   }
 };

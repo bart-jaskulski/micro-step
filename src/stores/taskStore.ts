@@ -1,8 +1,9 @@
-import { createMemo, createRoot } from "solid-js";
+import { createEffect, createMemo, createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
 import { isServer } from "solid-js/web";
 import { LexoRank } from "lexorank";
-import { getDb, initSchema } from "~/lib/db";
+import { initDb, exec, query, dbVersion } from "~/lib/db";
+import { fetchMainViewTasks } from "~/lib/query";
 
 const nanoid = () => {
   const array = new Uint8Array(16);
@@ -17,9 +18,16 @@ export type Task = {
   text: string;
   completed: boolean;
   createdAt: number;
+  updatedAt: number;
   dueAt: number | null;
   rank: string;
+  isStalled: boolean;
 };
+
+export const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const isStalled = (task: Task, now: number = Date.now()): boolean =>
+  task.updatedAt === task.createdAt && (now - task.createdAt) > STALE_THRESHOLD_MS;
 
 export type TreeNode = Task & {
   children: TreeNode[];
@@ -32,8 +40,10 @@ const dbRowToTask = (row: any): Task => ({
   text: row.text,
   completed: Boolean(row.completed),
   createdAt: row.created_at,
+  updatedAt: row.updated_at,
   dueAt: row.due_at,
   rank: row.rank,
+  isStalled: Boolean(row.is_stalled),
 });
 
 const compareDueThenRank = (a: Task, b: Task) => {
@@ -44,13 +54,11 @@ const compareDueThenRank = (a: Task, b: Task) => {
 };
 
 const computeInitialRank = async (parentId: string | null, dueAt: number | null) => {
-  const db = await getDb();
-  
   let rows: any[];
   if (parentId) {
-    rows = await db.execO("SELECT * FROM tasks WHERE parent_id = ?", [parentId]);
+    rows = await query("SELECT * FROM tasks WHERE parent_id = ?", [parentId]);
   } else {
-    rows = await db.execO("SELECT * FROM tasks WHERE parent_id IS NULL");
+    rows = await query("SELECT * FROM tasks WHERE parent_id IS NULL");
   }
 
   if (!rows || !Array.isArray(rows) || rows.length === 0) {
@@ -89,8 +97,7 @@ const taskStore = createRoot(() => {
   });
 
   const refreshTasks = async () => {
-    const db = await getDb();
-    const rows = await db.execO("SELECT * FROM tasks");
+    const rows = await fetchMainViewTasks();
     console.log("[client] refreshTasks - fetched rows", rows);
     const taskMap: Record<string, Task> = {};
     
@@ -105,11 +112,19 @@ const taskStore = createRoot(() => {
     console.log("[client] refreshTasks", { count: Object.keys(taskMap).length });
   };
 
+  // Auto-refresh when db changes via worker broadcast
+  createEffect(() => {
+    const version = dbVersion();
+    if (version > 0) {
+      refreshTasks();
+    }
+  });
+
   const initializeTaskStore = async () => {
     if (isServer) return;
 
     try {
-      await initSchema();
+      await initDb();
       await refreshTasks();
       setState("isSynced", true);
     } catch (err) {
@@ -157,24 +172,18 @@ const taskStore = createRoot(() => {
         node.effectiveDueDate = minChildDate;
       }
 
-      node.children.sort((a, b) => {
-        return a.rank.localeCompare(b.rank);
-      });
-
       return node.effectiveDueDate;
     };
 
     roots.forEach(processNode);
 
-    roots.sort((a, b) => a.rank.localeCompare(b.rank));
-
     return roots;
   });
 
-  return { state, setState, refreshTasks, initializeTaskStore, tasks };
+  return { state, setState, initializeTaskStore, tasks };
 });
 
-const { state, setState, refreshTasks, initializeTaskStore, tasks } = taskStore;
+const { state, setState, initializeTaskStore, tasks } = taskStore;
 
 export { initializeTaskStore, tasks };
 
@@ -196,23 +205,22 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
 
   const rank = await computeInitialRank(parentId, dueAt);
 
-  const db = await getDb();
-  
-  db.exec(
-    "INSERT INTO tasks (id, parent_id, text, completed, created_at, due_at, rank) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [id, parentId, data.content, 0, Date.now(), dueAt, rank]
+  const now = Date.now();
+  await exec(
+    "INSERT INTO tasks (id, parent_id, text, completed, created_at, updated_at, due_at, rank) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, parentId, data.content, 0, now, now, dueAt, rank]
   );
-
-  await refreshTasks();
 
   const newTask: Task = {
     id,
     parentId,
     text: data.content,
     completed: false,
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
     dueAt,
     rank,
+    isStalled: false,
   };
 
   console.log("[client] addTask", { id, parentId, text: data.content });
@@ -220,12 +228,9 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
 };
 
 export const updateTask = async (id: string, fields: Partial<Task>) => {
-  const db = await getDb();
-  const rows = await db.execO("SELECT * FROM tasks WHERE id = ?", [id]);
+  const rows = await query("SELECT * FROM tasks WHERE id = ?", [id]);
   
   if (!rows || !Array.isArray(rows) || rows.length === 0) return;
-
-  const current = rows[0];
 
   const updates: string[] = [];
   const values: any[] = [];
@@ -252,9 +257,10 @@ export const updateTask = async (id: string, fields: Partial<Task>) => {
   }
 
   if (updates.length) {
+    updates.push("updated_at = ?");
+    values.push(Date.now());
     values.push(id);
-    db.exec(`UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`, values);
-    await refreshTasks();
+    await exec(`UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`, values);
   }
 };
 
@@ -264,12 +270,9 @@ export const moveTask = async (
   prevSiblingRank?: string, 
   nextSiblingRank?: string
 ) => {
-  const db = await getDb();
-  const rows = await db.execO("SELECT * FROM tasks WHERE id = ?", [taskId]);
+  const rows = await query("SELECT * FROM tasks WHERE id = ?", [taskId]);
   
   if (!rows || !Array.isArray(rows) || rows.length === 0) return;
-
-  const task = rows[0];
 
   let newRank;
   if (!prevSiblingRank && !nextSiblingRank) {
@@ -282,23 +285,19 @@ export const moveTask = async (
     newRank = LexoRank.parse(prevSiblingRank!).between(LexoRank.parse(nextSiblingRank!)).toString();
   }
 
-  db.exec(
-    "UPDATE tasks SET parent_id = ?, rank = ? WHERE id = ?",
-    [newParentId, newRank, taskId]
+  await exec(
+    "UPDATE tasks SET parent_id = ?, rank = ?, updated_at = ? WHERE id = ?",
+    [newParentId, newRank, Date.now(), taskId]
   );
-
-  await refreshTasks();
 };
 
 export const deleteTask = async (id: string) => {
-  const db = await getDb();
-  
   const toRemove: string[] = [id];
   let found = true;
 
   while (found) {
     found = false;
-    const rows = db.exec("SELECT * FROM tasks");
+    const rows = await query("SELECT * FROM tasks");
     if (Array.isArray(rows)) {
       rows.forEach((row: any) => {
         if (toRemove.includes(row.parent_id) && !toRemove.includes(row.id)) {
@@ -309,9 +308,7 @@ export const deleteTask = async (id: string) => {
     }
   }
 
-  toRemove.forEach(taskId => {
-    db.exec("DELETE FROM tasks WHERE id = ?", [taskId]);
-  });
-
-  await refreshTasks();
+  for (const taskId of toRemove) {
+    await exec("DELETE FROM tasks WHERE id = ?", [taskId]);
+  }
 };
