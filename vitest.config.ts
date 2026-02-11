@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
+import tailwindcss from '@tailwindcss/vite';
 
 const srcPath = new URL("./src", import.meta.url).pathname;
 

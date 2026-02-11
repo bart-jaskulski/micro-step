@@ -1,12 +1,11 @@
-import { MetaProvider, Title } from "@solidjs/meta";
+import { Link, Meta, MetaProvider, Title } from "@solidjs/meta";
 import { Router } from "@solidjs/router";
 import { FileRoutes } from "@solidjs/start/router";
 import { Suspense, onMount, onCleanup } from "solid-js";
 import { initializeVaultStore } from "~/stores/vaultStore";
 import { initializeTaskStore, cleanupReactiveQueries } from "~/stores/taskStore";
 import { initializeSync } from "~/lib/sync";
-import BottomNav from "~/components/BottomNav";
-import "./app.css";
+import "./index.css";
 
 export default function App() {
   onMount(async () => {
@@ -26,9 +25,11 @@ export default function App() {
     <Router
       root={props => (
         <MetaProvider>
-          <Title>SolidStart - Basic</Title>
+          <Title>FocusFlow</Title>
+          <Link rel="preconnect" href="https://fonts.googleapis.com" />
+          <Link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+          <Link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
           <Suspense>{props.children}</Suspense>
-          <BottomNav />
         </MetaProvider>
       )}
     >

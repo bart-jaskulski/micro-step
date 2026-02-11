@@ -1,12 +1,11 @@
 import { defineConfig } from "@solidjs/start/config";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  server: {
-    experimental: {
-      websocket: false
-    }
-  },
   vite: {
+    plugins: [
+      tailwindcss()
+    ],
     optimizeDeps: {
       exclude: ["@vlcn.io/crsqlite-wasm"]
     },

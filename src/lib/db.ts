@@ -1,4 +1,5 @@
 import initWasm from "@vlcn.io/crsqlite-wasm";
+import wasmUrl from "@vlcn.io/crsqlite-wasm/crsqlite.wasm?url";
 import { isServer } from "solid-js/web";
 
 type DB = any;
@@ -20,14 +21,14 @@ const initializeDb = async (): Promise<DB> => {
 
   initPromise = (async () => {
     try {
-      const sqlite = await initWasm();
+      const sqlite = await initWasm(() => wasmUrl);
 
       if (isOpfsSupported()) {
         console.log("Using OPFS for database storage");
         db = sqlite.open("microstep.db");
       } else {
         console.log("OPFS not supported; falling back to IndexedDB storage");
-        db = sqlite.open("microstep.db");
+        db = sqlite.open(":memory:");
       }
 
       return db as DB;
