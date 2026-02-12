@@ -13,6 +13,7 @@ export const breakdownTask = action(async (data: FormData) => {
   const granularity = data.get("granularity") as string;
   const clarification = data.get("clarification") as string | null;
   const hasClarification = !!clarification;
+  console.log("[server] breakdownTask request", { task, granularity, hasClarification });
 
   let granularityInstruction = "Break tasks into standard, manageable chunks.";
   if (granularity === "low") granularityInstruction = "Keep tasks high-level and broad. Do not over-fragment.";
@@ -62,9 +63,11 @@ ${
 
   const { toolName, input } = steps[steps.length - 1].content[0];
 
-  return {
+  const response = {
     ok: true,
     action: toolName,
     ...input
-  }
+  };
+  console.log("[server] breakdownTask response", response);
+  return response;
 }, "task");
