@@ -1,5 +1,6 @@
-import { Component, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
 import { A } from "@solidjs/router";
+import ArrowLeft from "lucide-solid/icons/arrow-left";
 import { vaultState } from "~/stores/vaultStore";
 import { syncStateStore, syncNow } from "~/lib/sync";
 import { isOnline } from "~/stores/networkStore";
@@ -32,83 +33,87 @@ export default function SettingsPage() {
   };
 
   return (
-    <div class="settings-page">
-      <header class="settings-header">
-        <h1>Settings</h1>
-        <A href="/" class="back-link">← Back to Tasks</A>
+    <div class="min-h-screen bg-[#F9F9F8] text-stone-700 p-4">
+      <header class="flex items-center gap-4 mb-8 pt-4">
+        <A href="/" class="p-2 rounded-full hover:bg-stone-200 transition text-stone-500">
+          <ArrowLeft class="w-5 h-5" />
+        </A>
+        <h1 class="text-2xl font-light tracking-tight text-stone-800">Settings</h1>
       </header>
 
-      <div class="settings-section">
-        <h2>Sync & Devices</h2>
-        
-        <div class="setting-item">
-          <div class="setting-info">
-            <div class="setting-label">Device Pairing</div>
-            <div class="setting-description">
-              {vaultState.isPaired 
-                ? "This device is paired with a vault. Add more devices to sync your tasks."
-                : "Not paired. Pair this device to enable sync across your devices."
-              }
+      <div class="max-w-md mx-auto space-y-8">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-6">
+          <h2 class="text-lg font-medium text-stone-800">Sync & Devices</h2>
+          
+          <div class="flex justify-between items-center">
+            <div>
+              <span class="text-stone-700 font-medium block">Device Pairing</span>
+              <span class="text-stone-400 text-xs">
+                {vaultState.isPaired 
+                  ? "Paired. Add more devices to sync."
+                  : "Not paired. Pair to enable sync."
+                }
+              </span>
             </div>
+            <A href="/pair" class="px-4 py-2 bg-stone-100 rounded-lg text-sm text-stone-600 hover:bg-stone-200 font-medium transition-colors">
+              {vaultState.isPaired ? "Manage" : "Pair"}
+            </A>
           </div>
-          <A href="/pair" class="settings-button">
-            {vaultState.isPaired ? "Manage Devices" : "Pair Device"}
-          </A>
-        </div>
 
-        {vaultState.isPaired && (
-          <div class="setting-item">
-            <div class="setting-info">
-              <div class="setting-label">Device ID</div>
-              <div class="setting-description">
-                Your unique identifier for this device
+          {vaultState.isPaired && (
+            <div class="flex justify-between items-center">
+              <div>
+                <span class="text-stone-700 font-medium block">Device ID</span>
+                <span class="text-stone-400 text-xs">Your unique identifier</span>
               </div>
+              <code class="text-xs bg-stone-100 px-2 py-1 rounded text-stone-600 max-w-[120px] truncate">{vaultState.deviceId}</code>
             </div>
-            <code class="device-id">{vaultState.deviceId}</code>
-          </div>
-        )}
+          )}
 
-        <div class="setting-item">
-          <div class="setting-info">
-            <div class="setting-label">Sync Status</div>
-            <div class="setting-description">
-              Last synced: {formatLastSync()}
+          <hr class="border-stone-100" />
+
+          <div class="flex justify-between items-center">
+            <div>
+              <span class="text-stone-700 font-medium block">Sync Status</span>
+              <span class="text-stone-400 text-xs">Last: {formatLastSync()}</span>
             </div>
+            <span class={`px-3 py-1 rounded-full text-xs font-medium ${
+              getSyncStatus() === "synced" ? "bg-green-100 text-green-700" :
+              getSyncStatus() === "syncing" ? "bg-blue-100 text-blue-700" :
+              "bg-stone-100 text-stone-500"
+            }`}>
+              {getSyncStatus()}
+            </span>
           </div>
-          <span class={`sync-status-badge ${getSyncStatus()}`}>
-            {getSyncStatus()}
-          </span>
-        </div>
 
-        {vaultState.isPaired && (
-          <div class="setting-item">
-            <div class="setting-info">
-              <div class="setting-label">Manual Sync</div>
-              <div class="setting-description">
-                Force sync with vault now
+          {vaultState.isPaired && (
+            <>
+              <hr class="border-stone-100" />
+              <div class="flex justify-between items-center">
+                <div>
+                  <span class="text-stone-700 font-medium block">Manual Sync</span>
+                  <span class="text-stone-400 text-xs">Force sync now</span>
+                </div>
+                <button 
+                  type="button" 
+                  class="px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-medium hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleSyncNow}
+                  disabled={isSyncing() || !isOnline()}
+                >
+                  {isSyncing() ? "Syncing..." : "Sync Now"}
+                </button>
               </div>
-            </div>
-            <button 
-              type="button" 
-              class="settings-button sync-button"
-              onClick={handleSyncNow}
-              disabled={isSyncing() || !isOnline()}
-            >
-              {isSyncing() ? "Syncing..." : "Sync Now"}
-            </button>
-          </div>
-        )}
-      </div>
+            </>
+          )}
+        </div>
 
-      <div class="settings-section">
-        <h2>About</h2>
-        <div class="setting-item">
-          <div class="setting-info">
-            <div class="setting-label">Version</div>
-            <div class="setting-description">0.1.0</div>
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
+          <h2 class="text-lg font-medium text-stone-800">About</h2>
+          <div class="flex justify-between items-center">
+            <span class="text-stone-700 font-medium">Version</span>
+            <span class="text-stone-400 text-sm">0.1.0</span>
           </div>
         </div>
-        <A href="/about" class="settings-link">About this app →</A>
       </div>
     </div>
   );

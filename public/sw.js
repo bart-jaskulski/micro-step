@@ -1,8 +1,17 @@
 const CACHE_NAME = "microstep-v1";
+const IS_LOCAL_DEV =
+  self.location.hostname === "localhost" ||
+  self.location.hostname === "127.0.0.1" ||
+  self.location.hostname === "[::1]";
 
 const PRECACHE_URLS = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
+  if (IS_LOCAL_DEV) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
   event.waitUntil(
     caches
       .open(CACHE_NAME)
@@ -12,6 +21,16 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  if (IS_LOCAL_DEV) {
+    event.waitUntil(
+      caches
+        .keys()
+        .then((names) => Promise.all(names.map((name) => caches.delete(name))))
+        .then(() => self.clients.claim()),
+    );
+    return;
+  }
+
   event.waitUntil(
     caches
       .keys()
@@ -87,6 +106,8 @@ self.addEventListener("sync", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (IS_LOCAL_DEV) return;
+
   const { request } = event;
 
   if (request.method !== "GET") return;

@@ -18,7 +18,7 @@ This is a **Local-First AI Task Manager** built with **SolidStart**. It is desig
 - **Language**: TypeScript.
 - **Data Layer (Local-First)**: **cr-sqlite** for structured queries with CRDTs, persisted via **OPFS** (Origin Private File System) with IndexedDB fallback. Tasks stored in SQL tables. There is **no** traditional backend database (Postgres/MySQL).
 - **AI Layer**: Vercel AI SDK (`ai`, `@ai-sdk/google`) running on Server Actions to interface with Gemini.
-- **Styling**: Modern vanilla CSS with CSS Variables, layers, CSS nesting, scoped component CSS, features like View Transitions and modern size values.
+- **Styling**: **Tailwind CSS v4** with utility classes. Stone color palette, Outfit font. Component-level styling via Tailwind utilities inline in JSX.
 - **Ordering**: `lexorank` for efficient drag-and-drop sorting.
 - **Sync Architecture**: File-based encrypted changesets stored in **Cloudflare R2**. Sync is pull-to-refresh (no real-time WebSocket). Device-to-device pairing via QR codes with end-to-end encryption.
 
@@ -30,10 +30,10 @@ This is a **Local-First AI Task Manager** built with **SolidStart**. It is desig
 
 | #:  | AI _may_ do                                                                                                                                         | AI _must NOT_ do                                                                                                                                      |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G-0 | Ask for clarification if the task involves adding a backend database or changing the local-first architecture.                                      | ❌ Attempt to install Tailwind, ORMs (Prisma/Drizzle), or switch to React.                                                                            |
+| G-0 | Ask for clarification if the task involves adding a backend database or changing the local-first architecture.                                      | ❌ Attempt to install ORMs (Prisma/Drizzle) or switch to React.                                                                            |
 | G-1 | Generate code **only inside** `src/` or explicitly pointed configuration files.                                                                     | ❌ Touch `.vinxi/`, `.output/`, or `node_modules/`.                                                                                                   |
 | G-2 | Use **SolidJS primitives** (`createSignal`, `createEffect`, `Show`, `For`).                                                                         | ❌ Use React hooks (`useState`, `useEffect`) or React patterns (dependency arrays, virtual DOM logic).                                                |
-| G-3 | Follow existing CSS patterns (CSS variables defined in `app.css`, separate `.css` files for components).                                            | ❌ Introduce CSS-in-JS libraries or Utility classes (Tailwind) unless explicitly requested.                                                           |
+| G-3 | Follow existing Tailwind CSS patterns (utility classes in JSX, theme in `app.css`).                                                                 | ❌ Introduce CSS-in-JS libraries. Use Tailwind utilities, not separate CSS files per component.                                                       |
 | G-4 | For changes >300 LOC or >5 files, **ask for confirmation** before proceeding.                                                                       | ❌ Refactor the `taskStore.ts` synchronization logic without deep understanding of Y.js.                                                              |
 | G-5 | Stay within the current task context. Inform the developer if it would be better to start afresh.                                                   | ❌ Continue work from a prior prompt after "new task" – start a fresh session.                                                                        |
 
@@ -52,9 +52,10 @@ This is a **Local-First AI Task Manager** built with **SolidStart**. It is desig
     -   Task mutations happen via SQL queries to cr-sqlite database.
     -   Vault keys and sync state stored in IndexedDB.
 - **Styling**:
-    -   Use minimal amount of classes, enhance css + html with data attributes for variable styling, (e.g., button[type="submit"] or .container[data-size="large"])
-    -   Design for mobile-first experience, targeting media queries only above certain screen sizes.
-    -   Leverage variables from `app.css` (e.g., `var(--accent)`, `var(--surface)`).
+    -   Use Tailwind CSS utility classes inline in JSX for all styling.
+    -   Theme variables defined in `src/app.css` via `@theme` block.
+    -   Stone color palette (`stone-50` through `stone-950`), Outfit font family.
+    -   Design for mobile-first experience.
 - **Icons**: Use `lucide-solid`.
 
 ---

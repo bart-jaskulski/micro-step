@@ -6,6 +6,7 @@ let db: any = null;
 const initDb = async () => {
   const sqlite = await initWasm();
   db = await sqlite.open("microstep.db");
+  console.log(db)
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (

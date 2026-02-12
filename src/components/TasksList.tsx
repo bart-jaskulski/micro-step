@@ -5,7 +5,6 @@ import Minus from "lucide-solid/icons/minus";
 import TaskItem from "./TaskItem";
 import { DragProvider, useDrag, type DropPosition } from "./DragProvider";
 import { moveTask, tasks as tasksStore, type TreeNode } from "~/stores/taskStore";
-import './TasksList.css';
 
 export default clientOnly(async () => ({ default: TasksList }), { lazy: true });
 
@@ -99,7 +98,7 @@ function TasksList(props: TasksListProps) {
     if (!node) return null;
 
     return (
-      <div class="drag-overlay__card">
+      <div class="bg-white p-3 rounded-xl border border-stone-200 shadow-xl opacity-90 rotate-2 w-[300px]">
         {node.text}
       </div>
     );
@@ -126,7 +125,7 @@ type TaskBranchProps = TasksListProps & { expansion: ExpansionState };
 function TaskBranch(props: TaskBranchProps) {
   const level = props.level ?? 0;
   return (
-    <ol class="tasks-list" data-level={level}>
+    <ol class="flex flex-col gap-3">
       <For each={props.tasks} fallback={props.fallback}>
         {(task => (
           <TaskNode
@@ -165,59 +164,51 @@ function TaskNode(props: TaskNodeProps) {
 
   const collapse = () => props.expansion.setExpanded(props.node.id, false);
 
+  const dropStyles = () => {
+    if (!isTarget()) return "";
+    const pos = drag.state.dropPosition;
+    if (pos === "above") return "border-t-4 border-stone-800 -mt-1";
+    if (pos === "below") return "border-b-4 border-stone-800 -mb-1";
+    if (pos === "inside") return "ring-2 ring-stone-400 ring-offset-2 rounded-xl";
+    return "";
+  };
+
   return (
     <li
-      class="task-node"
-      classList={{
-        "is-expanded": isExpanded(),
-        "has-children": hasChildren(),
-        "is-dragged": isDragged(),
-        "is-drop-target": isTarget(),
-        "drop-above": isTarget() && drag.state.dropPosition === "above",
-        "drop-below": isTarget() && drag.state.dropPosition === "below",
-        "drop-inside": isTarget() && drag.state.dropPosition === "inside",
-      }}
+      class={`relative transition-all ${isDragged() ? 'opacity-30' : ''} ${dropStyles()}`}
       data-task-id={props.node.id}
     >
-      <div class="task-node__card">
+      <div class="relative z-10 group/card">
         <TaskItem {...props.node}/>
-        <Show when={hasChildren()}>
-          <button
-            type="button"
-            class="shelf-deck"
-            aria-expanded={isExpanded()}
-            aria-label="Expand subtasks"
+        
+        {/* Stack Trigger (Expand Button when collapsed) */}
+        <Show when={hasChildren() && !isExpanded()}>
+          <div 
+            class="absolute bottom-[-6px] left-1 right-1 h-3 bg-white border border-stone-200 border-t-0 rounded-b-xl cursor-pointer shadow-sm hover:bg-stone-50 hover:translate-y-[2px] transition-all z-0"
             onClick={expand}
-            disabled={isExpanded()}
-          >
-            <span aria-hidden="true" class="shelf-card" />
-            <span aria-hidden="true" class="shelf-card" />
-          </button>
+            title="Expand subtasks"
+          />
         </Show>
       </div>
 
-      <Show when={hasChildren()}>
-        <div class="node-children-wrapper">
-          <div aria-hidden="true" class="spine-line" />
-          <button
-            type="button"
-            class="spine-tab"
+      <Show when={hasChildren() && isExpanded()}>
+        <div class="relative pl-4 mt-2 ml-3.5 border-l-2 border-[#E7E5E4] pb-2 animate-in slide-in-from-top-2 duration-200">
+          <button 
+            onClick={collapse} 
+            class="absolute -left-[9px] -top-1 bg-stone-100 hover:bg-stone-200 text-stone-500 border border-stone-200 rounded-full w-4 h-4 flex items-center justify-center z-20"
             aria-label="Collapse subtasks"
-            tabIndex={isExpanded() ? 0 : -1}
-            onClick={collapse}
           >
-            <Minus />
+            <Minus class="w-2.5 h-2.5" />
           </button>
-          <div class="node-children-animator">
-            <div class="node-children-inner">
-              <TaskBranch
-                tasks={props.node.children}
-                level={(props.level ?? 0) + 1}
-                defaultExpanded={props.defaultExpanded}
-                expansion={props.expansion}
-                fallback={props.fallback}
-              />
-            </div>
+          
+          <div class="pt-2">
+            <TaskBranch
+              tasks={props.node.children}
+              level={(props.level ?? 0) + 1}
+              defaultExpanded={props.defaultExpanded}
+              expansion={props.expansion}
+              fallback={props.fallback}
+            />
           </div>
         </div>
       </Show>
