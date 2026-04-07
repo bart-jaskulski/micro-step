@@ -473,6 +473,7 @@ const applySnapshot = async (snapshot: Uint8Array): Promise<void> => {
 };
 
 let wasOfflineWhileHidden = false;
+let listenersInitialized = false;
 
 const setupVisibilityListener = () => {
   document.addEventListener("visibilitychange", async () => {
@@ -508,12 +509,20 @@ const setupOnlineListener = () => {
 };
 
 export const initializeSync = async () => {
+  if (!vaultState.isPaired) {
+    return;
+  }
+
   const lastSync = await getSyncIDBValue<number>("lastSyncTimestamp");
   if (lastSync) {
     setSyncState("lastSyncTimestamp", lastSync);
   }
 
-  setupVisibilityListener();
-  setupOnlineListener();
+  if (!listenersInitialized) {
+    setupVisibilityListener();
+    setupOnlineListener();
+    listenersInitialized = true;
+  }
+
   await syncNow();
 };

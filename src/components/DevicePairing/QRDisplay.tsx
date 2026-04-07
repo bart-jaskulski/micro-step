@@ -1,44 +1,47 @@
-import { Component, createSignal, onMount } from "solid-js";
+import { Component, Show, createEffect, createSignal } from "solid-js";
 import QRCode from "qrcode";
-import { vaultState } from "~/stores/vaultStore";
 
-export const QRDisplay: Component = () => {
+type QRDisplayProps = {
+  joinUrl: string;
+};
+
+export const QRDisplay: Component<QRDisplayProps> = (props) => {
   const [qrDataUrl, setQrDataUrl] = createSignal<string>("");
   const [error, setError] = createSignal<string | null>(null);
 
-  onMount(async () => {
-    try {
-      if (!vaultState.vaultKey) {
-        setError("No vault key available");
-        return;
-      }
+  createEffect(() => {
+    setQrDataUrl("");
+    setError(null);
 
-      const qrString = JSON.stringify({
-        key: vaultState.vaultKey,
-        deviceId: vaultState.deviceId,
+    void QRCode.toDataURL(props.joinUrl, {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: "#292524",
+        light: "#ffffff",
+      },
+    })
+      .then(setQrDataUrl)
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to generate QR code");
       });
-
-      const dataUrl = await QRCode.toDataURL(qrString, {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: "#000000",
-          light: "#ffffff",
-        },
-      });
-
-      setQrDataUrl(dataUrl);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate QR code");
-    }
   });
 
   return (
-    <div class="qr-display">
-      {error() && <div class="error">{error()}</div>}
-      {!error() && qrDataUrl() && (
-        <img src={qrDataUrl()} alt="Vault QR Code" class="qr-image" />
-      )}
+    <div class="flex w-full flex-col items-center gap-4">
+      <Show when={error()}>
+        <p class="text-sm text-red-600">{error()}</p>
+      </Show>
+      <Show when={!error() && qrDataUrl()}>
+        <img
+          src={qrDataUrl()}
+          alt="Vault pairing QR code"
+          class="w-full max-w-[300px] rounded-2xl border border-stone-200"
+        />
+      </Show>
+      <p class="text-center text-xs text-stone-500">
+        This QR contains the full join link for this vault.
+      </p>
     </div>
   );
 };
