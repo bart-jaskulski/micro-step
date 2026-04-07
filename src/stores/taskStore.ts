@@ -15,6 +15,7 @@ const nanoid = () => {
 export type Task = {
   id: string;
   parentId: string | null;
+  workspaceId: string;
   text: string;
   completed: boolean;
   createdAt: number;
@@ -24,7 +25,16 @@ export type Task = {
   isStalled: boolean;
 };
 
+export type Workspace = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_WORKSPACE_ID = "default";
+const WORKSPACE_STORAGE_KEY = "microstep:selected-workspace-id";
 
 export const isStalled = (task: Task, now: number = Date.now()): boolean =>
   task.updatedAt === task.createdAt && (now - task.createdAt) > STALE_THRESHOLD_MS;
@@ -37,6 +47,7 @@ export type TreeNode = Task & {
 const dbRowToTask = (row: any): Task => ({
   id: row.id,
   parentId: row.parent_id,
+  workspaceId: row.workspace_id,
   text: row.text,
   completed: Boolean(row.completed),
   createdAt: row.created_at,
@@ -46,6 +57,55 @@ const dbRowToTask = (row: any): Task => ({
   isStalled: Boolean(row.is_stalled),
 });
 
+const dbRowToWorkspace = (row: any): Workspace => ({
+  id: row.id,
+  name: row.name,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const readSelectedWorkspacePreference = () => {
+  if (isServer || typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to read selected workspace preference:", error);
+    return null;
+  }
+};
+
+const writeSelectedWorkspacePreference = (workspaceId: string | null) => {
+  if (isServer || typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (workspaceId) {
+      window.localStorage.setItem(WORKSPACE_STORAGE_KEY, workspaceId);
+      return;
+    }
+
+    window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to persist selected workspace preference:", error);
+  }
+};
+
+export const resolveSelectedWorkspaceId = (
+  availableWorkspaces: Workspace[],
+  preferredWorkspaceId: string | null
+) => {
+  if (preferredWorkspaceId && availableWorkspaces.some((workspace) => workspace.id === preferredWorkspaceId)) {
+    return preferredWorkspaceId;
+  }
+
+  const defaultWorkspace = availableWorkspaces.find((workspace) => workspace.id === DEFAULT_WORKSPACE_ID);
+  return defaultWorkspace?.id ?? availableWorkspaces[0]?.id ?? null;
+};
+
 const compareDueThenRank = (a: Task, b: Task) => {
   const aDue = a.dueAt ?? Number.POSITIVE_INFINITY;
   const bDue = b.dueAt ?? Number.POSITIVE_INFINITY;
@@ -53,12 +113,16 @@ const compareDueThenRank = (a: Task, b: Task) => {
   return a.rank.localeCompare(b.rank);
 };
 
-const computeInitialRank = async (parentId: string | null, dueAt: number | null) => {
+const computeInitialRank = async (
+  parentId: string | null,
+  dueAt: number | null,
+  workspaceId: string
+) => {
   let rows: any[];
   if (parentId) {
     rows = await query("SELECT * FROM tasks WHERE parent_id = ?", [parentId]);
   } else {
-    rows = await query("SELECT * FROM tasks WHERE parent_id IS NULL");
+    rows = await query("SELECT * FROM tasks WHERE parent_id IS NULL AND workspace_id = ?", [workspaceId]);
   }
 
   if (!rows || !Array.isArray(rows) || rows.length === 0) {
@@ -93,11 +157,30 @@ const computeInitialRank = async (parentId: string | null, dueAt: number | null)
 const taskStore = createRoot(() => {
   const [state, setState] = createStore({
     tasks: {} as Record<string, Task>,
+    workspaces: [] as Workspace[],
+    selectedWorkspaceId: null as string | null,
     isSynced: false,
   });
 
-  const refreshTasks = async () => {
-    const rows = await fetchMainViewTasks();
+  const setSelectedWorkspace = (workspaceId: string | null) => {
+    setState("selectedWorkspaceId", workspaceId);
+    writeSelectedWorkspacePreference(workspaceId);
+  };
+
+  const refreshWorkspaces = async () => {
+    const rows = await query("SELECT * FROM workspaces ORDER BY created_at ASC");
+    const nextWorkspaces = Array.isArray(rows) ? rows.map(dbRowToWorkspace) : [];
+    setState("workspaces", nextWorkspaces);
+    return nextWorkspaces;
+  };
+
+  const refreshTasks = async (workspaceId: string | null = state.selectedWorkspaceId) => {
+    if (!workspaceId) {
+      setState("tasks", {});
+      return;
+    }
+
+    const rows = await fetchMainViewTasks(workspaceId);
     console.log("[client] refreshTasks - fetched rows", rows);
     const taskMap: Record<string, Task> = {};
     
@@ -112,11 +195,23 @@ const taskStore = createRoot(() => {
     console.log("[client] refreshTasks", { count: Object.keys(taskMap).length });
   };
 
+  const refreshWorkspaceState = async (preferredWorkspaceId: string | null) => {
+    const availableWorkspaces = await refreshWorkspaces();
+    const resolvedWorkspaceId = resolveSelectedWorkspaceId(availableWorkspaces, preferredWorkspaceId);
+
+    if (resolvedWorkspaceId !== state.selectedWorkspaceId) {
+      setSelectedWorkspace(resolvedWorkspaceId);
+    }
+
+    await refreshTasks(resolvedWorkspaceId);
+    return resolvedWorkspaceId;
+  };
+
   // Auto-refresh when db changes via worker broadcast
   createEffect(() => {
     const version = dbVersion();
     if (version > 0) {
-      refreshTasks();
+      void refreshWorkspaceState(state.selectedWorkspaceId ?? readSelectedWorkspacePreference());
     }
   });
 
@@ -125,7 +220,7 @@ const taskStore = createRoot(() => {
 
     try {
       await initDb();
-      await refreshTasks();
+      await refreshWorkspaceState(readSelectedWorkspacePreference());
       setState("isSynced", true);
     } catch (err) {
       console.error("Failed to initialize task store:", err);
@@ -180,12 +275,14 @@ const taskStore = createRoot(() => {
     return roots;
   });
 
-  return { state, setState, initializeTaskStore, tasks };
+  return { state, setState, initializeTaskStore, tasks, refreshTasks, setSelectedWorkspace };
 });
 
-const { state, setState, initializeTaskStore, tasks } = taskStore;
+const { state, setState, initializeTaskStore, tasks, refreshTasks, setSelectedWorkspace } = taskStore;
 
 export { initializeTaskStore, tasks };
+export const workspaces = () => state.workspaces;
+export const selectedWorkspaceId = () => state.selectedWorkspaceId;
 
 export const rawTasks = state.tasks;
 
@@ -196,6 +293,14 @@ type NewTaskPayload = {
 
 export const addTask = async (data: NewTaskPayload, parentId: string | null = null) => {
   const id = nanoid();
+  const workspaceId = parentId
+    ? (await query<{ workspace_id: string }>("SELECT workspace_id FROM tasks WHERE id = ?", [parentId]))[0]?.workspace_id
+    : state.selectedWorkspaceId;
+
+  if (!workspaceId) {
+    throw new Error("Cannot create a task without a selected workspace");
+  }
+
   const parsedDue = data.dueDate
     ? typeof data.dueDate === "number"
       ? data.dueDate
@@ -203,17 +308,18 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
     : null;
   const dueAt = Number.isFinite(parsedDue) ? parsedDue : null;
 
-  const rank = await computeInitialRank(parentId, dueAt);
+  const rank = await computeInitialRank(parentId, dueAt, workspaceId);
 
   const now = Date.now();
   await exec(
-    "INSERT INTO tasks (id, parent_id, text, completed, created_at, updated_at, due_at, rank) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, parentId, data.content, 0, now, now, dueAt, rank]
+    "INSERT INTO tasks (id, parent_id, text, completed, created_at, updated_at, due_at, rank, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, parentId, data.content, 0, now, now, dueAt, rank, workspaceId]
   );
 
   const newTask: Task = {
     id,
     parentId,
+    workspaceId,
     text: data.content,
     completed: false,
     createdAt: now,
@@ -225,6 +331,46 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
 
   console.log("[client] addTask", { id, parentId, text: data.content });
   return newTask;
+};
+
+export const selectWorkspace = async (workspaceId: string) => {
+  if (!state.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    return;
+  }
+
+  setSelectedWorkspace(workspaceId);
+  await refreshTasks(workspaceId);
+};
+
+export const createWorkspace = async (name: string) => {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return null;
+  }
+
+  const id = nanoid();
+  const now = Date.now();
+
+  await exec(
+    "INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    [id, trimmedName, now, now]
+  );
+
+  setSelectedWorkspace(id);
+  setState("tasks", {});
+  return id;
+};
+
+export const renameWorkspace = async (id: string, name: string) => {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    return;
+  }
+
+  await exec(
+    "UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
+    [trimmedName, Date.now(), id]
+  );
 };
 
 export const updateTask = async (id: string, fields: Partial<Task>) => {

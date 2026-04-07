@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { isStalled, STALE_THRESHOLD_MS, type Task } from "./taskStore";
+import {
+  DEFAULT_WORKSPACE_ID,
+  isStalled,
+  resolveSelectedWorkspaceId,
+  STALE_THRESHOLD_MS,
+  type Task,
+  type Workspace,
+} from "./taskStore";
 
 const makeTask = (overrides: Partial<Task> = {}): Task => ({
   id: "test-id",
   parentId: null,
+  workspaceId: DEFAULT_WORKSPACE_ID,
   text: "Test task",
   completed: false,
   createdAt: Date.now(),
@@ -40,6 +48,21 @@ describe("Task updatedAt", () => {
     const updated = Date.now();
     const task = makeTask({ createdAt: created, updatedAt: updated, parentId: "new-parent" });
     expect(task.updatedAt).toBeGreaterThan(task.createdAt);
+  });
+});
+
+describe("resolveSelectedWorkspaceId", () => {
+  const workspaces: Workspace[] = [
+    { id: DEFAULT_WORKSPACE_ID, name: "Default", createdAt: 1, updatedAt: 1 },
+    { id: "work", name: "Work", createdAt: 2, updatedAt: 2 },
+  ];
+
+  it("prefers a persisted workspace when it still exists", () => {
+    expect(resolveSelectedWorkspaceId(workspaces, "work")).toBe("work");
+  });
+
+  it("falls back to the default workspace when the preference is missing", () => {
+    expect(resolveSelectedWorkspaceId(workspaces, "missing")).toBe(DEFAULT_WORKSPACE_ID);
   });
 });
 

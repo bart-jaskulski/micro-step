@@ -10,10 +10,12 @@ SELECT *,
     ELSE 0
   END as is_stalled
 FROM tasks
+WHERE workspace_id = ?
 ORDER BY completed ASC, is_stalled DESC, parent_id ASC, rank ASC
 `;
 
-export const fetchMainViewTasks = <T = any>(): Promise<T[]> => query<T>(MAIN_VIEW_QUERY);
+export const fetchMainViewTasks = <T = any>(workspaceId: string): Promise<T[]> =>
+  query<T>(MAIN_VIEW_QUERY, [workspaceId]);
 
 type QueryCallback = () => any;
 
