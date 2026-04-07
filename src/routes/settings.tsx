@@ -1,9 +1,14 @@
-import { createSignal } from "solid-js";
+import { createSignal, For } from "solid-js";
 import { A } from "@solidjs/router";
 import ArrowLeft from "lucide-solid/icons/arrow-left";
 import { vaultState } from "~/stores/vaultStore";
 import { syncStateStore, syncNow } from "~/lib/sync";
 import { isOnline } from "~/stores/networkStore";
+import {
+  breakdownGranularity,
+  BREAKDOWN_GRANULARITY_OPTIONS,
+  setBreakdownGranularity,
+} from "~/stores/preferencesStore";
 
 export default function SettingsPage() {
   const [isSyncing, setIsSyncing] = createSignal(false);
@@ -105,6 +110,34 @@ export default function SettingsPage() {
               </div>
             </>
           )}
+        </div>
+
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
+          <h2 class="text-lg font-medium text-stone-800">Task Breakdown</h2>
+          <div class="space-y-3">
+            <div>
+              <span class="text-stone-700 font-medium block">Default detail level</span>
+              <span class="text-stone-400 text-xs">Used when AI breakdown is turned on in the composer</span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2">
+              <For each={BREAKDOWN_GRANULARITY_OPTIONS}>
+                {(level) => (
+                <button
+                  type="button"
+                  onClick={() => setBreakdownGranularity(level)}
+                  class={`rounded-xl border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                    breakdownGranularity() === level
+                      ? "border-stone-800 bg-stone-800 text-white"
+                      : "border-stone-200 bg-stone-50 text-stone-500 hover:border-stone-300 hover:text-stone-700"
+                  }`}
+                >
+                  {level}
+                </button>
+                )}
+              </For>
+            </div>
+          </div>
         </div>
 
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">

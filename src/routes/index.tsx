@@ -8,6 +8,11 @@ import Trash from "lucide-solid/icons/trash";
 import TaskPrompt from "~/components/TaskPrompt";
 import TasksList from "~/components/TasksList";
 import {
+  breakdownGranularity,
+  BREAKDOWN_GRANULARITY_OPTIONS,
+  setBreakdownGranularity,
+} from "~/stores/preferencesStore";
+import {
   createWorkspace,
   renameWorkspace,
   selectedWorkspaceId,
@@ -173,6 +178,33 @@ export default function Home() {
           </div>
 
           <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-6">
+            <div class="space-y-3">
+              <div>
+                <span class="text-stone-700 font-medium block">Task Breakdown</span>
+                <span class="text-stone-400 text-xs">Default detail level when AI breakdown is enabled</span>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2">
+                <For each={BREAKDOWN_GRANULARITY_OPTIONS}>
+                  {(level) => (
+                    <button
+                      type="button"
+                      onClick={() => setBreakdownGranularity(level)}
+                      class={`rounded-xl border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                        breakdownGranularity() === level
+                          ? "border-stone-800 bg-stone-800 text-white"
+                          : "border-stone-200 bg-stone-50 text-stone-500 hover:border-stone-300 hover:text-stone-700"
+                      }`}
+                    >
+                      {level}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            <hr class="border-stone-100" />
+
             <div class="flex justify-between items-center">
               <div>
                 <span class="text-stone-700 font-medium block">Sync Devices</span>
