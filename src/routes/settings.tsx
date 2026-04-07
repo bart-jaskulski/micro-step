@@ -1,4 +1,4 @@
-import { createSignal, For } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import ArrowLeft from "lucide-solid/icons/arrow-left";
 import { vaultState } from "~/stores/vaultStore";
@@ -9,16 +9,68 @@ import {
   BREAKDOWN_GRANULARITY_OPTIONS,
   setBreakdownGranularity,
 } from "~/stores/preferencesStore";
+import {
+  createWorkspace,
+  renameWorkspace,
+  selectedWorkspaceId,
+  selectWorkspace,
+  workspaces,
+} from "~/stores/taskStore";
+
+type StorageStatus = "checking" | "persisted" | "not-persisted" | "unavailable";
 
 export default function SettingsPage() {
   const [isSyncing, setIsSyncing] = createSignal(false);
+  const [storageStatus, setStorageStatus] = createSignal<StorageStatus>("checking");
+
+  onMount(async () => {
+    if (typeof navigator === "undefined" || !navigator.storage?.persisted) {
+      setStorageStatus("unavailable");
+      return;
+    }
+
+    try {
+      const persisted = await navigator.storage.persisted();
+      setStorageStatus(persisted ? "persisted" : "not-persisted");
+    } catch (error) {
+      console.warn("Failed to read persistent storage status:", error);
+      setStorageStatus("unavailable");
+    }
+  });
+
+  const promptForWorkspaceName = (message: string, initialValue = "") => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const nextName = window.prompt(message, initialValue)?.trim();
+    return nextName ? nextName : null;
+  };
+
+  const handleCreateWorkspace = async () => {
+    const name = promptForWorkspaceName("Name the new workspace");
+    if (!name) {
+      return;
+    }
+
+    await createWorkspace(name);
+  };
+
+  const handleRenameWorkspace = async (workspaceId: string, currentName: string) => {
+    const nextName = promptForWorkspaceName("Rename workspace", currentName);
+    if (!nextName || nextName === currentName) {
+      return;
+    }
+
+    await renameWorkspace(workspaceId, nextName);
+  };
 
   const handleSyncNow = async () => {
     setIsSyncing(true);
     try {
       await syncNow();
-    } catch (err) {
-      console.error("Sync failed:", err);
+    } catch (error) {
+      console.error("Sync failed:", error);
     } finally {
       setIsSyncing(false);
     }
@@ -37,6 +89,38 @@ export default function SettingsPage() {
     return date.toLocaleString();
   };
 
+  const storageLabel = () => {
+    if (storageStatus() === "persisted") {
+      return "Enabled";
+    }
+
+    if (storageStatus() === "not-persisted") {
+      return "Not granted";
+    }
+
+    if (storageStatus() === "checking") {
+      return "Checking";
+    }
+
+    return "Unavailable";
+  };
+
+  const storageDescription = () => {
+    if (storageStatus() === "persisted") {
+      return "This browser granted persistent storage for local task data.";
+    }
+
+    if (storageStatus() === "not-persisted") {
+      return "This browser may evict local data under storage pressure.";
+    }
+
+    if (storageStatus() === "checking") {
+      return "Checking browser storage guarantees.";
+    }
+
+    return "This browser does not expose persistent storage diagnostics.";
+  };
+
   return (
     <div class="min-h-screen bg-[#F9F9F8] text-stone-700 p-4">
       <header class="flex items-center gap-4 mb-8 pt-4">
@@ -47,17 +131,68 @@ export default function SettingsPage() {
       </header>
 
       <div class="max-w-md mx-auto space-y-8">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h2 class="text-lg font-medium text-stone-800">Workspaces</h2>
+              <p class="text-stone-400 text-xs">Choose the active workspace and manage names.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleCreateWorkspace()}
+              class="px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-medium hover:bg-black transition-colors"
+            >
+              New
+            </button>
+          </div>
+
+          <div class="space-y-3">
+            <For each={workspaces()}>
+              {(workspace) => (
+                <div class="flex items-center justify-between rounded-xl border border-stone-200 px-4 py-3">
+                  <div class="min-w-0">
+                    <span class="text-stone-700 font-medium block truncate">{workspace.name}</span>
+                    <Show when={selectedWorkspaceId() === workspace.id}>
+                      <span class="text-stone-400 text-xs">Current workspace</span>
+                    </Show>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void selectWorkspace(workspace.id)}
+                      class={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                        selectedWorkspaceId() === workspace.id
+                          ? "bg-stone-800 text-white"
+                          : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                      }`}
+                    >
+                      {selectedWorkspaceId() === workspace.id ? "Current" : "Use"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRenameWorkspace(workspace.id, workspace.name)}
+                      class="px-3 py-1.5 rounded-lg bg-white text-sm text-stone-500 hover:bg-stone-100 transition-colors"
+                    >
+                      Rename
+                    </button>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-6">
           <h2 class="text-lg font-medium text-stone-800">Sync & Devices</h2>
-          
+
           <div class="flex justify-between items-center">
             <div>
               <span class="text-stone-700 font-medium block">Device Pairing</span>
               <span class="text-stone-400 text-xs">
-                {vaultState.isPaired 
+                {vaultState.isPaired
                   ? "Paired. Add more devices to sync."
-                  : "Not paired. Pair to enable sync."
-                }
+                  : "Not paired. Pair to enable sync."}
               </span>
             </div>
             <A href="/pair" class="px-4 py-2 bg-stone-100 rounded-lg text-sm text-stone-600 hover:bg-stone-200 font-medium transition-colors">
@@ -65,15 +200,17 @@ export default function SettingsPage() {
             </A>
           </div>
 
-          {vaultState.isPaired && (
+          <Show when={vaultState.isPaired}>
             <div class="flex justify-between items-center">
               <div>
                 <span class="text-stone-700 font-medium block">Device ID</span>
                 <span class="text-stone-400 text-xs">Your unique identifier</span>
               </div>
-              <code class="text-xs bg-stone-100 px-2 py-1 rounded text-stone-600 max-w-[120px] truncate">{vaultState.deviceId}</code>
+              <code class="text-xs bg-stone-100 px-2 py-1 rounded text-stone-600 max-w-[120px] truncate">
+                {vaultState.deviceId}
+              </code>
             </div>
-          )}
+          </Show>
 
           <hr class="border-stone-100" />
 
@@ -91,7 +228,7 @@ export default function SettingsPage() {
             </span>
           </div>
 
-          {vaultState.isPaired && (
+          <Show when={vaultState.isPaired}>
             <>
               <hr class="border-stone-100" />
               <div class="flex justify-between items-center">
@@ -99,8 +236,8 @@ export default function SettingsPage() {
                   <span class="text-stone-700 font-medium block">Manual Sync</span>
                   <span class="text-stone-400 text-xs">Force sync now</span>
                 </div>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   class="px-4 py-2 bg-stone-800 text-white rounded-lg text-sm font-medium hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleSyncNow}
                   disabled={isSyncing() || !isOnline()}
@@ -109,7 +246,7 @@ export default function SettingsPage() {
                 </button>
               </div>
             </>
-          )}
+          </Show>
         </div>
 
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
@@ -123,17 +260,17 @@ export default function SettingsPage() {
             <div class="grid grid-cols-3 gap-2">
               <For each={BREAKDOWN_GRANULARITY_OPTIONS}>
                 {(level) => (
-                <button
-                  type="button"
-                  onClick={() => setBreakdownGranularity(level)}
-                  class={`rounded-xl border px-3 py-2 text-sm font-medium capitalize transition-colors ${
-                    breakdownGranularity() === level
-                      ? "border-stone-800 bg-stone-800 text-white"
-                      : "border-stone-200 bg-stone-50 text-stone-500 hover:border-stone-300 hover:text-stone-700"
-                  }`}
-                >
-                  {level}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setBreakdownGranularity(level)}
+                    class={`rounded-xl border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                      breakdownGranularity() === level
+                        ? "border-stone-800 bg-stone-800 text-white"
+                        : "border-stone-200 bg-stone-50 text-stone-500 hover:border-stone-300 hover:text-stone-700"
+                    }`}
+                  >
+                    {level}
+                  </button>
                 )}
               </For>
             </div>
@@ -141,10 +278,21 @@ export default function SettingsPage() {
         </div>
 
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
-          <h2 class="text-lg font-medium text-stone-800">About</h2>
-          <div class="flex justify-between items-center">
-            <span class="text-stone-700 font-medium">Version</span>
-            <span class="text-stone-400 text-sm">0.1.0</span>
+          <h2 class="text-lg font-medium text-stone-800">Storage</h2>
+          <div class="flex justify-between items-start gap-4">
+            <div>
+              <span class="text-stone-700 font-medium block">Persistent local data</span>
+              <span class="text-stone-400 text-xs">{storageDescription()}</span>
+            </div>
+            <span class={`px-3 py-1 rounded-full text-xs font-medium ${
+              storageStatus() === "persisted"
+                ? "bg-green-100 text-green-700"
+                : storageStatus() === "not-persisted"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-stone-100 text-stone-500"
+            }`}>
+              {storageLabel()}
+            </span>
           </div>
         </div>
       </div>

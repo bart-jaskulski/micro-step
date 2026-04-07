@@ -1,6 +1,7 @@
 import { createContext, useContext, type JSX, type ParentComponent, Show, batch, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import { Portal } from "solid-js/web";
+import { listSortMode } from "~/stores/preferencesStore";
 
 export type DropPosition = "above" | "below" | "inside" | null;
 
@@ -164,6 +165,11 @@ export const DragProvider: ParentComponent<DragProviderProps> = (props) => {
   };
 
   const startDrag = (event: PointerEvent, id: string, el: HTMLElement) => {
+    if (listSortMode() !== "manual") {
+      announce("Switch to manual sort to reorder tasks");
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     el.setPointerCapture(event.pointerId);
