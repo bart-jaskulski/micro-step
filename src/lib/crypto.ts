@@ -56,6 +56,5 @@ export const hashVaultKeyToPath = async (vaultKeyBase64: string): Promise<string
   }
   const hashBuffer = await window.crypto.subtle.digest("SHA-256", keyBuffer);
   const hashArray = new Uint8Array(hashBuffer);
-  const hashBinaryString = Array.from(hashArray, (byte) => String.fromCharCode(byte)).join("");
-  return btoa(hashBinaryString);
-}; 
+  return Array.from(hashArray, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};

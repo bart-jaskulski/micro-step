@@ -6,10 +6,12 @@ type VaultState = {
   vaultPath: string | null;
   deviceId: string | null;
   isPaired: boolean;
+  requiresRemoteBootstrap: boolean;
 };
 
 const VAULT_IDB_NAME = "vault_store";
 const VAULT_IDB_VERSION = 1;
+const REQUIRES_REMOTE_BOOTSTRAP_KEY = "requiresRemoteBootstrap";
 
 let idb: IDBDatabase | null = null;
 
@@ -71,11 +73,13 @@ const [state, setState] = createStore<VaultState>({
   vaultPath: null,
   deviceId: null,
   isPaired: false,
+  requiresRemoteBootstrap: false,
 });
 
 export const initializeVaultStore = async () => {
   const vaultKey = await getIDBValue<string>("vaultKey");
   const deviceId = await getIDBValue<string>("deviceId");
+  const requiresRemoteBootstrap = await getIDBValue<boolean>(REQUIRES_REMOTE_BOOTSTRAP_KEY);
   
   if (!deviceId) {
     const newDeviceId = generateDeviceId();
@@ -91,6 +95,7 @@ export const initializeVaultStore = async () => {
       vaultKey,
       vaultPath,
       isPaired: true,
+      requiresRemoteBootstrap: Boolean(requiresRemoteBootstrap),
     });
   }
 };
@@ -102,12 +107,14 @@ export const createVault = async () => {
 
   await setIDBValue("vaultKey", vaultKey);
   await setIDBValue("deviceId", deviceId);
+  await setIDBValue(REQUIRES_REMOTE_BOOTSTRAP_KEY, false);
 
   setState({
     vaultKey,
     vaultPath,
     deviceId,
     isPaired: true,
+    requiresRemoteBootstrap: false,
   });
 
   return { vaultKey, vaultPath, deviceId };
@@ -119,22 +126,31 @@ export const joinVault = async (vaultKey: string) => {
 
   await setIDBValue("vaultKey", vaultKey);
   await setIDBValue("deviceId", deviceId);
+  await setIDBValue(REQUIRES_REMOTE_BOOTSTRAP_KEY, true);
 
   setState({
     vaultKey,
     vaultPath,
     deviceId,
     isPaired: true,
+    requiresRemoteBootstrap: true,
   });
+};
+
+export const resolveRemoteBootstrap = async () => {
+  await setIDBValue(REQUIRES_REMOTE_BOOTSTRAP_KEY, false);
+  setState("requiresRemoteBootstrap", false);
 };
 
 export const clearVault = async () => {
   await setIDBValue("vaultKey", null);
+  await setIDBValue(REQUIRES_REMOTE_BOOTSTRAP_KEY, false);
 
   setState({
     vaultKey: null,
     vaultPath: null,
     isPaired: false,
+    requiresRemoteBootstrap: false,
   });
 };
 
