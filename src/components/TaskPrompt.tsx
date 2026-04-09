@@ -256,6 +256,12 @@ export default function TaskPrompt(props: TaskPromptProps) {
                   <ArrowUp class={`w-6 h-6 ${isSavingLocally() || submission.pending ? "animate-bounce" : ""}`} />
                 </button>
               </div>
+
+              <Show when={isAiEnabled() && !isOnline()}>
+                <p class="mt-3 text-sm text-amber-700">
+                  AI breakdown needs an internet connection. You can still save this as a local task.
+                </p>
+              </Show>
             </Show>
 
             <Show when={mode() === "clarify"}>
@@ -292,6 +298,11 @@ export default function TaskPrompt(props: TaskPromptProps) {
                     Reply
                   </button>
                 </div>
+                <Show when={!isOnline()}>
+                  <p class="text-sm text-amber-700">
+                    Reconnect to continue the AI clarification flow.
+                  </p>
+                </Show>
               </div>
             </Show>
 

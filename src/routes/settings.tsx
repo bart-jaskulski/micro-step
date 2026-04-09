@@ -231,10 +231,14 @@ export default function SettingsPage() {
           <Show when={vaultState.isPaired}>
             <>
               <hr class="border-stone-100" />
-              <div class="flex justify-between items-center">
+              <div class="flex justify-between items-center gap-4">
                 <div>
                   <span class="text-stone-700 font-medium block">Manual Sync</span>
-                  <span class="text-stone-400 text-xs">Force sync now</span>
+                  <span class="text-stone-400 text-xs">
+                    {isOnline()
+                      ? "Force sync now"
+                      : "Offline changes stay queued on this device until you reconnect."}
+                  </span>
                 </div>
                 <button
                   type="button"
