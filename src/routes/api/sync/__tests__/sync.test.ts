@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { POST } from "../[vault]/upload";
 import { GET as listGET } from "../[vault]/list";
 import { GET as downloadGET } from "../[vault]/download/[filename]";
+import {
+  CHANGESET_UPLOAD_MAX_BYTES,
+  MAX_CHANGESETS_PER_VAULT,
+} from "../_security";
+import { resetRateLimitStore } from "~/lib/requestSecurity";
 
 const STORAGE_ROOT = resolve("./storage/vaults");
 const TEST_VAULT = "test-vault-abc123";
@@ -19,10 +24,12 @@ function makeAPIEvent(request: Request, params: Record<string, string> = {}) {
 
 describe("Sync API Endpoints", () => {
   beforeEach(async () => {
+    resetRateLimitStore();
     await rm(join(STORAGE_ROOT, TEST_VAULT), { recursive: true, force: true });
   });
 
   afterEach(async () => {
+    resetRateLimitStore();
     await rm(join(STORAGE_ROOT, TEST_VAULT), { recursive: true, force: true });
   });
 
@@ -63,6 +70,99 @@ describe("Sync API Endpoints", () => {
 
       const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
       expect(response.status).toBe(400);
+    });
+
+    it("rejects oversized uploads with 413", async () => {
+      const body = new Uint8Array(CHANGESET_UPLOAD_MAX_BYTES + 1);
+      const request = makeRequest(`/api/sync/${TEST_VAULT}/upload`, {
+        method: "POST",
+        headers: {
+          "X-Device-Id": TEST_DEVICE,
+          "content-length": String(body.byteLength),
+        },
+        body,
+      });
+
+      const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
+
+      expect(response.status).toBe(413);
+    });
+
+    it("rate limits repeated writes and recovers after the window resets", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
+
+      try {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          const request = makeRequest(`/api/sync/${TEST_VAULT}/upload`, {
+            method: "POST",
+            headers: {
+              "X-Device-Id": TEST_DEVICE,
+              "user-agent": "vitest",
+              "x-forwarded-for": "198.51.100.10",
+            },
+            body: new Uint8Array([attempt]),
+          });
+
+          const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
+          expect(response.status).toBe(200);
+          vi.advanceTimersByTime(1);
+        }
+
+        const limitedRequest = makeRequest(`/api/sync/${TEST_VAULT}/upload`, {
+          method: "POST",
+          headers: {
+            "X-Device-Id": TEST_DEVICE,
+            "user-agent": "vitest",
+            "x-forwarded-for": "198.51.100.10",
+          },
+          body: new Uint8Array([31]),
+        });
+
+        const limitedResponse = await POST(makeAPIEvent(limitedRequest, { vault: TEST_VAULT }));
+        expect(limitedResponse.status).toBe(429);
+
+        vi.advanceTimersByTime(60_001);
+
+        const recoveredRequest = makeRequest(`/api/sync/${TEST_VAULT}/upload`, {
+          method: "POST",
+          headers: {
+            "X-Device-Id": TEST_DEVICE,
+            "user-agent": "vitest",
+            "x-forwarded-for": "198.51.100.10",
+          },
+          body: new Uint8Array([32]),
+        });
+
+        const recoveredResponse = await POST(makeAPIEvent(recoveredRequest, { vault: TEST_VAULT }));
+        expect(recoveredResponse.status).toBe(200);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("prunes the oldest changesets once the vault exceeds the configured limit", async () => {
+      const vaultDir = join(STORAGE_ROOT, TEST_VAULT);
+      await mkdir(vaultDir, { recursive: true });
+
+      for (let index = 1; index <= MAX_CHANGESETS_PER_VAULT; index += 1) {
+        await writeFile(join(vaultDir, `${index}-${TEST_DEVICE}.bin`), Buffer.from([index % 255]));
+      }
+
+      const request = makeRequest(`/api/sync/${TEST_VAULT}/upload`, {
+        method: "POST",
+        headers: {
+          "X-Device-Id": TEST_DEVICE,
+        },
+        body: new Uint8Array([9, 9, 9]),
+      });
+
+      const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
+      expect(response.status).toBe(200);
+
+      const files = (await readdir(vaultDir)).filter((filename) => filename.endsWith(".bin"));
+      expect(files).toHaveLength(MAX_CHANGESETS_PER_VAULT);
+      expect(files).not.toContain(`1-${TEST_DEVICE}.bin`);
     });
   });
 

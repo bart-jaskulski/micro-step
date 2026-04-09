@@ -78,7 +78,6 @@ const ensureSchema = async () => {
 const initDb = async () => {
   const sqlite = await initWasm();
   db = await sqlite.open("microstep.db");
-  console.log(db)
 
   await ensureSchema();
 };

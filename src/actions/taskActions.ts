@@ -1,7 +1,13 @@
 import { action } from "@solidjs/router";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText, tool } from "ai";
+import { getRequestEvent } from "solid-js/web";
 import { z } from "zod";
+import {
+  buildRateLimitBucketKey,
+  consumeRateLimit,
+  type RateLimitPolicy,
+} from "~/lib/requestSecurity";
 import type { BreakdownGranularity } from "~/stores/preferencesStore";
 
 const openai = createGoogleGenerativeAI({
@@ -50,13 +56,42 @@ type ToolCallPayload = {
   input?: unknown;
 };
 
+const AI_RATE_LIMIT_POLICIES: readonly RateLimitPolicy[] = [
+  {
+    id: "ai-breakdown-1m",
+    maxRequests: 5,
+    windowMs: 60_000,
+  },
+  {
+    id: "ai-breakdown-1h",
+    maxRequests: 30,
+    windowMs: 60 * 60_000,
+  },
+];
+
+export const consumeAiBreakdownRateLimit = (request: Request, clientAddress?: string) =>
+  consumeRateLimit(
+    buildRateLimitBucketKey(request, "ai-breakdown", clientAddress),
+    AI_RATE_LIMIT_POLICIES,
+  );
+
 export const breakdownTask = action(async (data: FormData) => {
   "use server";
+  const requestEvent = getRequestEvent();
+  const request = requestEvent?.request;
+  if (!request) {
+    throw new Error("Missing request context for task breakdown");
+  }
+
+  const rateLimitResult = consumeAiBreakdownRateLimit(request, requestEvent.clientAddress);
+  if (!rateLimitResult.allowed) {
+    throw new Error("Too many AI breakdown requests. Please wait a minute and try again.");
+  }
+
   const task = readFormString(data.get("task"));
   const granularity = normalizeGranularity(readFormString(data.get("granularity")));
   const clarification = readFormString(data.get("clarification")) || null;
   const hasClarification = !!clarification;
-  console.log("[server] breakdownTask request", { task, granularity, hasClarification });
 
   let granularityInstruction = "Break tasks into standard, manageable chunks.";
   if (granularity === "low") granularityInstruction = "Keep tasks high-level and broad. Do not over-fragment.";
@@ -101,23 +136,19 @@ ${
   const lastToolCall = steps[steps.length - 1]?.content[0] as ToolCallPayload | undefined;
 
   if (lastToolCall?.toolName === "createTasks") {
-    const response: BreakdownTaskResult = {
+    return {
       ok: true,
       action: "createTasks",
       ...createTasksSchema.parse(lastToolCall.input),
     };
-    console.log("[server] breakdownTask response", response);
-    return response;
   }
 
   if (lastToolCall?.toolName === "askClarification") {
-    const response: BreakdownTaskResult = {
+    return {
       ok: true,
       action: "askClarification",
       ...askClarificationSchema.parse(lastToolCall.input),
     };
-    console.log("[server] breakdownTask response", response);
-    return response;
   }
 
   throw new Error("AI response did not produce a supported tool call");

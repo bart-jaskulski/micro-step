@@ -24,18 +24,21 @@ export default function TaskPrompt(props: TaskPromptProps) {
   const [taskText, setTaskText] = createSignal<string>("");
   const submissionResult = createMemo(() => submission.result as BreakdownTaskResult | undefined);
 
-  const runWithTransition = async (fn: () => void | Promise<void>) => {
+  const runWithTransition = async <T,>(fn: () => T | Promise<T>): Promise<T> => {
     const startViewTransition = (document as Document & {
       startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
     }).startViewTransition;
 
     if (startViewTransition) {
-      const transition = startViewTransition.call(document, () => fn());
+      let result!: T;
+      const transition = startViewTransition.call(document, async () => {
+        result = await fn();
+      });
       await transition.finished;
-      return;
+      return result;
     }
 
-    await fn();
+    return await fn();
   };
 
   const resetComposer = () => {
@@ -59,26 +62,22 @@ export default function TaskPrompt(props: TaskPromptProps) {
   createEffect(
     on(submissionResult, async (result) => {
       if (result) {
-        console.log("[client] breakdownTask result", result);
         switch (result.action) {
         case "createTasks":
           const { tasks } = result;
           const rootDueDate = dueDate() || undefined;
 
-          let newTask: Awaited<ReturnType<typeof addTask>>;
-          await runWithTransition(async () => {
-            newTask = await addTask({
+          const newTask = await runWithTransition(() =>
+            addTask({
               content: result.title,
               dueDate: rootDueDate,
-            });
-          });
+            })
+          );
 
-          console.log("[client] root task created", newTask);
           if (!newTask) return;
           for (const t of tasks) {
             await runWithTransition(() => addTask(t, newTask.id));
           }
-          console.log("[client] subtasks added", tasks.length);
           setIsOpen(false);
           resetComposer();
           break;

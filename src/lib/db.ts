@@ -64,7 +64,6 @@ export const initDb = async (): Promise<void> => {
   worker = new Worker(new URL('../workers/db.worker.ts', import.meta.url), {
     type: 'module',
   });
-  console.log(worker);
 
   worker.onmessage = handleMessage;
 

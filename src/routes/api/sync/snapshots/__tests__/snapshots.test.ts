@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { POST } from "../../[vault]/snapshots/upload";
 import { GET as listGET } from "../../[vault]/snapshots/list";
 import { GET as downloadGET } from "../../[vault]/snapshots/download/[filename]";
+import {
+  MAX_SNAPSHOTS_PER_VAULT,
+  SNAPSHOT_UPLOAD_MAX_BYTES,
+} from "../../_security";
+import { resetRateLimitStore } from "~/lib/requestSecurity";
 
 const STORAGE_ROOT = resolve("./storage/vaults");
 const TEST_VAULT = "test-vault-snapshots";
@@ -19,10 +24,12 @@ function makeAPIEvent(request: Request, params: Record<string, string> = {}) {
 
 describe("Snapshot API Endpoints", () => {
   beforeEach(async () => {
+    resetRateLimitStore();
     await rm(join(STORAGE_ROOT, TEST_VAULT), { recursive: true, force: true });
   });
 
   afterEach(async () => {
+    resetRateLimitStore();
     await rm(join(STORAGE_ROOT, TEST_VAULT), { recursive: true, force: true });
   });
 
@@ -63,6 +70,67 @@ describe("Snapshot API Endpoints", () => {
 
       const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
       expect(response.status).toBe(400);
+    });
+
+    it("rejects oversized snapshots with 413", async () => {
+      const body = new Uint8Array(SNAPSHOT_UPLOAD_MAX_BYTES + 1);
+      const request = makeRequest(`/api/sync/${TEST_VAULT}/snapshots/upload`, {
+        method: "POST",
+        headers: {
+          "X-Device-Id": TEST_DEVICE,
+          "content-length": String(body.byteLength),
+        },
+        body,
+      });
+
+      const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
+
+      expect(response.status).toBe(413);
+    });
+
+    it("uses a new snapshot as the compaction point and trims stale snapshots", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(6_000));
+
+      try {
+        const vaultDir = join(STORAGE_ROOT, TEST_VAULT);
+        const snapshotDir = join(vaultDir, "snapshots");
+        await mkdir(snapshotDir, { recursive: true });
+
+        await writeFile(join(vaultDir, "1000-device-a.bin"), Buffer.from([1]));
+        await writeFile(join(vaultDir, "2000-device-a.bin"), Buffer.from([2]));
+        await writeFile(join(vaultDir, "7000-device-a.bin"), Buffer.from([7]));
+
+        for (let timestamp = 1000; timestamp <= 5000; timestamp += 1000) {
+          await writeFile(
+            join(snapshotDir, `${timestamp}-${TEST_DEVICE}.snapshot.bin`),
+            Buffer.from([timestamp / 1000]),
+          );
+        }
+
+        const request = makeRequest(`/api/sync/${TEST_VAULT}/snapshots/upload`, {
+          method: "POST",
+          headers: {
+            "X-Device-Id": TEST_DEVICE,
+          },
+          body: new Uint8Array([9, 8, 7]),
+        });
+
+        const response = await POST(makeAPIEvent(request, { vault: TEST_VAULT }));
+        expect(response.status).toBe(200);
+
+        const remainingChangesets = (await readdir(vaultDir))
+          .filter((filename) => filename.endsWith(".bin") && !filename.endsWith(".snapshot.bin"))
+          .sort();
+        expect(remainingChangesets).toEqual(["7000-device-a.bin"]);
+
+        const remainingSnapshots = (await readdir(snapshotDir)).sort();
+        expect(remainingSnapshots).toHaveLength(MAX_SNAPSHOTS_PER_VAULT);
+        expect(remainingSnapshots).not.toContain(`1000-${TEST_DEVICE}.snapshot.bin`);
+        expect(remainingSnapshots).toContain(`6000-${TEST_DEVICE}.snapshot.bin`);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

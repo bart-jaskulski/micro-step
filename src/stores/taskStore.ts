@@ -181,7 +181,6 @@ const taskStore = createRoot(() => {
     }
 
     const rows = await fetchMainViewTasks(workspaceId);
-    console.log("[client] refreshTasks - fetched rows", rows);
     const taskMap: Record<string, Task> = {};
     
     if (Array.isArray(rows)) {
@@ -192,7 +191,6 @@ const taskStore = createRoot(() => {
     }
     
     setState("tasks", taskMap);
-    console.log("[client] refreshTasks", { count: Object.keys(taskMap).length });
   };
 
   const refreshWorkspaceState = async (preferredWorkspaceId: string | null) => {
@@ -329,7 +327,6 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
     isStalled: false,
   };
 
-  console.log("[client] addTask", { id, parentId, text: data.content });
   return newTask;
 };
 

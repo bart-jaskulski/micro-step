@@ -1,8 +1,14 @@
 import { type APIEvent } from "@solidjs/start/server";
 import { readFile } from "node:fs/promises";
 import { resolveVaultFilePath } from "../../../_storage";
+import { enforceSyncRateLimit } from "../../../_security";
 
 export async function GET(event: APIEvent) {
+  const rateLimitResponse = enforceSyncRateLimit(event.request, event.clientAddress, "read");
+  if (rateLimitResponse) {
+    return rateLimitResponse;
+  }
+
   const vault = event.params.vault;
   const filename = event.params.filename;
 

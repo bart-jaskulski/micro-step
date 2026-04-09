@@ -1,12 +1,35 @@
-import { join, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 export const STORAGE_ROOT = resolve("./storage/vaults");
 
-const isSinglePathSegment = (value: string) =>
-  value.length > 0 && !value.includes("/") && !value.includes("\\");
+const isSinglePathSegment = (value: string) => {
+  if (!value || value === "." || value === ".." || value.includes("/") || value.includes("\\")) {
+    return false;
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return false;
+  }
+
+  return decoded.length > 0
+    && decoded !== "."
+    && decoded !== ".."
+    && !decoded.includes("/")
+    && !decoded.includes("\\");
+};
+
+const isWithinStorageRoot = (candidate: string) => {
+  const resolvedCandidate = resolve(candidate);
+  const relativePath = relative(STORAGE_ROOT, resolvedCandidate);
+
+  return !relativePath.startsWith("..") && !isAbsolute(relativePath);
+};
 
 const splitVaultSegments = (vault: string | undefined) => {
-  if (!vault || vault.includes("\\")) {
+  if (!vault) {
     return null;
   }
 
@@ -24,8 +47,8 @@ export const resolveVaultPath = (vault: string | undefined) => {
     return null;
   }
 
-  const vaultDir = join(STORAGE_ROOT, ...segments);
-  if (!resolve(vaultDir).startsWith(STORAGE_ROOT)) {
+  const vaultDir = resolve(STORAGE_ROOT, ...segments);
+  if (!isWithinStorageRoot(vaultDir)) {
     return null;
   }
 
@@ -42,8 +65,8 @@ export const resolveVaultFilePath = (vault: string | undefined, ...segments: str
     return null;
   }
 
-  const filePath = join(STORAGE_ROOT, ...vaultSegments, ...segments);
-  if (!resolve(filePath).startsWith(STORAGE_ROOT)) {
+  const filePath = resolve(STORAGE_ROOT, ...vaultSegments, ...segments);
+  if (!isWithinStorageRoot(filePath)) {
     return null;
   }
 

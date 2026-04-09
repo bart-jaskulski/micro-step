@@ -1,8 +1,14 @@
 import { type APIEvent } from "@solidjs/start/server";
 import { readdir } from "node:fs/promises";
 import { resolveVaultPath } from "../_storage";
+import { enforceSyncRateLimit } from "../_security";
 
 export async function GET(event: APIEvent) {
+  const rateLimitResponse = enforceSyncRateLimit(event.request, event.clientAddress, "read");
+  if (rateLimitResponse) {
+    return rateLimitResponse;
+  }
+
   const vault = event.params.vault;
   const vaultDir = resolveVaultPath(vault);
   const afterParam = new URL(event.request.url).searchParams.get("after");
