@@ -15,14 +15,6 @@ export default function App() {
 
     if (typeof window !== "undefined") {
       void initializeSync();
-
-      // Request persistent storage
-      if (navigator.storage?.persist) {
-        const persisted = await navigator.storage.persist();
-        if (!persisted) {
-          console.warn("Persistent storage not granted");
-        }
-      }
     }
   });
 

@@ -10,7 +10,7 @@
     "allowJs": true,
     "strict": true,
     "noEmit": true,
-    "types": ["vinxi/types/client", "vitest/globals", "@testing-library/jest-dom/vitest", "vite/client", "node"],
+    "types": ["@solidjs/start/env", "vitest/globals", "@testing-library/jest-dom/vitest", "vite/client", "node"],
     "isolatedModules": true,
     "skipLibCheck": true,
     "paths": {

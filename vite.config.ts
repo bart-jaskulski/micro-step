@@ -1,10 +1,14 @@
-import { defineConfig } from "@solidjs/start/config";
+import { solidStart } from "@solidjs/start/config";
+import { nitroV2Plugin } from "@solidjs/vite-plugin-nitro-2";
 import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-export default defineConfig({
-  vite: {
+export default defineConfig(() => {
+  return {
     plugins: [
+      solidStart(),
+      nitroV2Plugin(),
       tailwindcss(),
       VitePWA({
         strategies: "injectManifest",
@@ -23,8 +27,8 @@ export default defineConfig({
       }),
     ],
     optimizeDeps: {
-      exclude: ["@vlcn.io/crsqlite-wasm"]
+      exclude: ["@vlcn.io/crsqlite-wasm"],
     },
-    assetsInclude: ["**/*.wasm"]
-  }
+    assetsInclude: ["**/*.wasm"],
+  };
 });

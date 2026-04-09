@@ -22,8 +22,9 @@ type StorageStatus = "checking" | "persisted" | "not-persisted" | "unavailable";
 export default function SettingsPage() {
   const [isSyncing, setIsSyncing] = createSignal(false);
   const [storageStatus, setStorageStatus] = createSignal<StorageStatus>("checking");
+  const [isRequestingStorage, setIsRequestingStorage] = createSignal(false);
 
-  onMount(async () => {
+  const refreshStorageStatus = async () => {
     if (typeof navigator === "undefined" || !navigator.storage?.persisted) {
       setStorageStatus("unavailable");
       return;
@@ -36,6 +37,10 @@ export default function SettingsPage() {
       console.warn("Failed to read persistent storage status:", error);
       setStorageStatus("unavailable");
     }
+  };
+
+  onMount(async () => {
+    await refreshStorageStatus();
   });
 
   const promptForWorkspaceName = (message: string, initialValue = "") => {
@@ -89,6 +94,25 @@ export default function SettingsPage() {
     return date.toLocaleString();
   };
 
+  const handleRequestPersistentStorage = async () => {
+    if (typeof navigator === "undefined" || !navigator.storage?.persist) {
+      setStorageStatus("unavailable");
+      return;
+    }
+
+    setIsRequestingStorage(true);
+
+    try {
+      await navigator.storage.persist();
+      await refreshStorageStatus();
+    } catch (error) {
+      console.warn("Failed to request persistent storage:", error);
+      await refreshStorageStatus();
+    } finally {
+      setIsRequestingStorage(false);
+    }
+  };
+
   const storageLabel = () => {
     if (storageStatus() === "persisted") {
       return "Enabled";
@@ -107,11 +131,11 @@ export default function SettingsPage() {
 
   const storageDescription = () => {
     if (storageStatus() === "persisted") {
-      return "This browser granted persistent storage for local task data.";
+      return "This browser was explicitly asked to protect local task data from eviction.";
     }
 
     if (storageStatus() === "not-persisted") {
-      return "This browser may evict local data under storage pressure.";
+      return "Local data still stays on this device, but the browser may evict it under storage pressure unless you request stronger protection.";
     }
 
     if (storageStatus() === "checking") {
@@ -284,9 +308,12 @@ export default function SettingsPage() {
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/60 space-y-4">
           <h2 class="text-lg font-medium text-stone-800">Storage</h2>
           <div class="flex justify-between items-start gap-4">
-            <div>
+            <div class="space-y-2">
               <span class="text-stone-700 font-medium block">Persistent local data</span>
               <span class="text-stone-400 text-xs">{storageDescription()}</span>
+              <p class="text-stone-400 text-xs">
+                This option only asks the browser to keep your offline task data more reliably on this device. It does not turn on sync or upload anything.
+              </p>
             </div>
             <span class={`px-3 py-1 rounded-full text-xs font-medium ${
               storageStatus() === "persisted"
@@ -298,6 +325,16 @@ export default function SettingsPage() {
               {storageLabel()}
             </span>
           </div>
+          <Show when={storageStatus() === "not-persisted"}>
+            <button
+              type="button"
+              onClick={() => void handleRequestPersistentStorage()}
+              disabled={isRequestingStorage()}
+              class="w-full rounded-xl bg-stone-800 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRequestingStorage() ? "Requesting..." : "Request Persistent Storage"}
+            </button>
+          </Show>
         </div>
       </div>
     </div>
