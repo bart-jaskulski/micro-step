@@ -299,7 +299,7 @@ export default function Home() {
 
         <TasksList
           tasks={visibleTasks()}
-          fallback={<div class="p-4 text-center text-stone-400">{emptyStateMessage()}</div>}
+          emptyState={<div class="p-4 text-center text-stone-400">{emptyStateMessage()}</div>}
         />
       </main>
 

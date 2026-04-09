@@ -1,4 +1,4 @@
-export const OFFLINE_DOCUMENT_PATHS = ["/", "/settings", "/pair", "/about"] as const;
+export const OFFLINE_DOCUMENT_PATHS = ["/", "/settings", "/pair"] as const;
 
 const STATIC_FILE_PATTERN = /\/[^/?]+\.[^/]+$/;
 

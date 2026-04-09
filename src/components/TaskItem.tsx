@@ -1,8 +1,10 @@
-import { Show, createEffect, createSignal, on } from "solid-js";
+import { Show, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { Portal } from "solid-js/web";
 import GripVertical from "lucide-solid/icons/grip-vertical";
 import Trash2 from "lucide-solid/icons/trash-2";
 import Calendar from "lucide-solid/icons/calendar";
 import Check from "lucide-solid/icons/check";
+import { formatDateInputValue, formatDueDateLabel, normalizeDateOnlyInput } from "~/lib/dates";
 import { deleteTask, updateTask } from "~/stores/taskStore";
 import type { Task } from "~/stores/taskStore";
 import { useDrag } from "./DragProvider";
@@ -14,8 +16,12 @@ type TaskItemProps = Task & {
 export default function TaskItem(props: TaskItemProps) {
   const drag = useDrag();
   const [isEditing, setIsEditing] = createSignal(false);
+  const [isEditingDueDate, setIsEditingDueDate] = createSignal(false);
+  const [dueDateAnchor, setDueDateAnchor] = createSignal<{ top: number; left: number; width: number; height: number } | null>(null);
   const [draft, setDraft] = createSignal(props.text);
   let inputRef: HTMLTextAreaElement | undefined;
+  let dueDateInputRef: HTMLInputElement | undefined;
+  let dueDateButtonRef: HTMLButtonElement | undefined;
 
   createEffect(on(isEditing, (editing) => {
     if (editing && inputRef) {
@@ -28,6 +34,60 @@ export default function TaskItem(props: TaskItemProps) {
       });
     }
   }));
+
+  const updateDueDateAnchor = () => {
+    if (!dueDateButtonRef) {
+      return;
+    }
+
+    const rect = dueDateButtonRef.getBoundingClientRect();
+    setDueDateAnchor({
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+
+  const closeDueDateEditor = () => {
+    setIsEditingDueDate(false);
+    setDueDateAnchor(null);
+  };
+
+  createEffect(() => {
+    if (!isEditingDueDate()) {
+      return;
+    }
+
+    updateDueDateAnchor();
+
+    const handleViewportChange = () => {
+      updateDueDateAnchor();
+    };
+
+    document.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+
+    let frameOne = 0;
+    let frameTwo = 0;
+
+    frameOne = window.requestAnimationFrame(() => {
+      frameTwo = window.requestAnimationFrame(() => {
+        dueDateInputRef?.showPicker?.() ?? dueDateInputRef?.focus();
+      });
+    });
+
+    onCleanup(() => {
+      if (frameOne) {
+        window.cancelAnimationFrame(frameOne);
+      }
+      if (frameTwo) {
+        window.cancelAnimationFrame(frameTwo);
+      }
+      document.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+    });
+  });
 
   const save = () => {
     const next = draft().trim();
@@ -49,16 +109,10 @@ export default function TaskItem(props: TaskItemProps) {
     el.style.height = el.scrollHeight + 'px';
   };
 
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const handleDueDateChange = (value: string) => {
+    const dueAt = normalizeDateOnlyInput(value);
+    updateTask(props.id, { dueAt });
+    closeDueDateEditor();
   };
 
   return (
@@ -126,11 +180,12 @@ export default function TaskItem(props: TaskItemProps) {
             </Show>
 
             {/* Actions */}
-            <div class="flex items-start shrink-0 opacity-0 group-hover/item:opacity-100 transition-opacity">
+            <div class="flex items-start shrink-0 opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 transition-opacity">
               <button 
                 onClick={(e) => { e.stopPropagation(); deleteTask(props.id); }}
                 class="text-stone-300 hover:text-red-400 p-1.5 rounded-md hover:bg-stone-100 transition-colors ml-1"
                 title="Delete"
+                aria-label="Delete task"
               >
                 <Trash2 class="w-4 h-4" />
               </button>
@@ -138,21 +193,51 @@ export default function TaskItem(props: TaskItemProps) {
           </div>
 
           {/* Date Badge */}
-          <div class="flex items-center">
-            <Show when={props.dueAt} fallback={
-              <div class="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border border-transparent text-stone-300 hover:bg-stone-50 hover:text-stone-400 opacity-60 hover:opacity-100 transition-all cursor-pointer">
-                 <Calendar class="w-3 h-3" />
-                 <span>Set date</span>
-              </div>
-            }>
-              <div class="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border bg-stone-50 border-stone-200 text-stone-500 transition-all cursor-pointer">
-                <Calendar class="w-3 h-3" />
-                <span>{formatDate(props.dueAt)}</span>
-              </div>
-            </Show>
+          <div class="relative flex items-center">
+            <button
+              ref={dueDateButtonRef}
+              type="button"
+              onClick={() => setIsEditingDueDate(true)}
+              class={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                props.dueAt === null
+                  ? "border border-transparent text-stone-300 opacity-80 hover:bg-stone-50 hover:text-stone-500"
+                  : "border bg-stone-50 border-stone-200 text-stone-500 hover:border-stone-300"
+              }`}
+              aria-label={props.dueAt === null ? "Set due date" : "Edit due date"}
+            >
+              <Calendar class="w-3 h-3" />
+              <span>{props.dueAt === null ? "Set date" : formatDueDateLabel(props.dueAt)}</span>
+            </button>
           </div>
         </div>
       </div>
+
+      <Show when={isEditingDueDate() && dueDateAnchor()}>
+        {(anchor) => (
+          <Portal>
+            <input
+              ref={dueDateInputRef}
+              type="date"
+              aria-label="Choose due date"
+              class="fixed z-[90] opacity-0 pointer-events-none"
+              style={{
+                top: `${anchor().top}px`,
+                left: `${anchor().left}px`,
+                width: `${anchor().width}px`,
+                height: `${anchor().height}px`,
+              }}
+              value={formatDateInputValue(props.dueAt)}
+              onChange={(event) => handleDueDateChange(event.currentTarget.value)}
+              onBlur={() => closeDueDateEditor()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  closeDueDateEditor();
+                }
+              }}
+            />
+          </Portal>
+        )}
+      </Show>
     </div>
   );
 }

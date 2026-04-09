@@ -1,10 +1,15 @@
 import { For, Show, type JSX } from "solid-js";
-import { createStore } from "solid-js/store";
 import { clientOnly } from "@solidjs/start";
 import Minus from "lucide-solid/icons/minus";
 import TaskItem from "./TaskItem";
 import { DragProvider, useDrag, type DropPosition } from "./DragProvider";
-import { moveTask, tasks as tasksStore, type TreeNode } from "~/stores/taskStore";
+import {
+  isTaskExpanded,
+  moveTask,
+  setTaskExpanded,
+  tasks as tasksStore,
+  type TreeNode,
+} from "~/stores/taskStore";
 
 export default clientOnly(async () => ({ default: TasksList }), { lazy: true });
 
@@ -12,7 +17,7 @@ type TasksListProps = {
   tasks: TreeNode[];
   level?: number;
   defaultExpanded?: boolean;
-  fallback?: JSX.Element;
+  emptyState?: JSX.Element;
 };
 
 type ExpansionState = {
@@ -20,9 +25,7 @@ type ExpansionState = {
   setExpanded: (id: string, value: boolean) => void;
 };
 
-function TasksList(props: TasksListProps) {
-  const [expandedMap, setExpandedMap] = createStore<Record<string, boolean>>({});
-
+export function TasksList(props: TasksListProps) {
   const handleDrop = (draggedId: string, targetId: string, position: Exclude<DropPosition, null>) => {
     const tree = tasksStore();
 
@@ -105,8 +108,8 @@ function TasksList(props: TasksListProps) {
   };
 
   const expansion: ExpansionState = {
-    isExpanded: (id) => expandedMap[id] ?? !!props.defaultExpanded,
-    setExpanded: (id, value) => setExpandedMap(id, value),
+    isExpanded: (id) => isTaskExpanded(id) || !!props.defaultExpanded,
+    setExpanded: (id, value) => setTaskExpanded(id, value),
   };
 
   return (
@@ -126,14 +129,14 @@ function TaskBranch(props: TaskBranchProps) {
   const level = props.level ?? 0;
   return (
     <ol class="flex flex-col gap-3">
-      <For each={props.tasks} fallback={props.fallback}>
+      <For each={props.tasks} fallback={props.emptyState}>
         {(task => (
           <TaskNode
             node={task}
             level={level}
             defaultExpanded={props.defaultExpanded}
             expansion={props.expansion}
-            fallback={props.fallback}
+            emptyState={props.emptyState}
           />
         ))}
       </For>
@@ -145,7 +148,7 @@ type TaskNodeProps = {
   node: TreeNode;
   level?: number;
   defaultExpanded?: boolean;
-  fallback?: JSX.Element;
+  emptyState?: JSX.Element;
   expansion: ExpansionState;
 };
 
@@ -178,16 +181,22 @@ function TaskNode(props: TaskNodeProps) {
       class={`relative transition-all ${isDragged() ? 'opacity-30' : ''} ${dropStyles()}`}
       data-task-id={props.node.id}
     >
-      <div class="relative z-10 group/card">
+      <div class={`relative z-10 group/card ${hasChildren() && !isExpanded() ? "pb-5" : ""}`}>
         <TaskItem {...props.node}/>
-        
-        {/* Stack Trigger (Expand Button when collapsed) */}
+
         <Show when={hasChildren() && !isExpanded()}>
-          <div 
-            class="absolute bottom-[-6px] left-1 right-1 h-3 bg-white border border-stone-200 border-t-0 rounded-b-xl cursor-pointer shadow-sm hover:bg-stone-50 hover:translate-y-[2px] transition-all z-0"
+          <button
+            type="button"
+            class="absolute inset-x-2 bottom-0 h-7 rounded-b-[18px] text-stone-500 transition-all hover:translate-y-[1px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:ring-offset-2"
             onClick={expand}
-            title="Expand subtasks"
-          />
+            aria-label={`Show ${props.node.children.length} subtasks`}
+          >
+            <span class="absolute inset-x-3 bottom-[8px] h-4 rounded-b-[14px] border border-stone-200 bg-stone-100" />
+            <span class="absolute inset-x-2 bottom-[4px] h-4 rounded-b-[16px] border border-stone-200 bg-stone-50" />
+            <span class="absolute inset-x-0 bottom-0 flex h-5 items-center justify-center rounded-b-[18px] border border-stone-200 border-t-0 bg-white/95 text-[11px] font-medium tracking-[0.02em] shadow-sm">
+              {props.node.children.length} step{props.node.children.length === 1 ? "" : "s"}
+            </span>
+          </button>
         </Show>
       </div>
 
@@ -207,7 +216,7 @@ function TaskNode(props: TaskNodeProps) {
               level={(props.level ?? 0) + 1}
               defaultExpanded={props.defaultExpanded}
               expansion={props.expansion}
-              fallback={props.fallback}
+              emptyState={props.emptyState}
             />
           </div>
         </div>

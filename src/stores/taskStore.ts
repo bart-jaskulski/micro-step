@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store";
 import { isServer } from "solid-js/web";
 import { LexoRank } from "lexorank";
 import { initDb, exec, query, dbVersion } from "~/lib/db";
+import { normalizeDueDateValue } from "~/lib/dates";
 import { fetchMainViewTasks } from "~/lib/query";
 
 const nanoid = () => {
@@ -157,6 +158,7 @@ const computeInitialRank = async (
 const taskStore = createRoot(() => {
   const [state, setState] = createStore({
     tasks: {} as Record<string, Task>,
+    expandedTaskIds: {} as Record<string, boolean>,
     workspaces: [] as Workspace[],
     selectedWorkspaceId: null as string | null,
     isSynced: false,
@@ -283,6 +285,10 @@ export const workspaces = () => state.workspaces;
 export const selectedWorkspaceId = () => state.selectedWorkspaceId;
 
 export const rawTasks = state.tasks;
+export const isTaskExpanded = (taskId: string) => Boolean(state.expandedTaskIds[taskId]);
+export const setTaskExpanded = (taskId: string, value: boolean) => {
+  setState("expandedTaskIds", taskId, value);
+};
 
 type NewTaskPayload = {
   content: string;
@@ -299,12 +305,7 @@ export const addTask = async (data: NewTaskPayload, parentId: string | null = nu
     throw new Error("Cannot create a task without a selected workspace");
   }
 
-  const parsedDue = data.dueDate
-    ? typeof data.dueDate === "number"
-      ? data.dueDate
-      : new Date(data.dueDate).getTime()
-    : null;
-  const dueAt = Number.isFinite(parsedDue) ? parsedDue : null;
+  const dueAt = normalizeDueDateValue(data.dueDate);
 
   const rank = await computeInitialRank(parentId, dueAt, workspaceId);
 
@@ -452,6 +453,7 @@ export const deleteTask = async (id: string) => {
   }
 
   for (const taskId of toRemove) {
+    setTaskExpanded(taskId, false);
     await exec("DELETE FROM tasks WHERE id = ?", [taskId]);
   }
 };

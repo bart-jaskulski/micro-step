@@ -7,7 +7,7 @@ import {
 
 describe("serviceWorkerRouting", () => {
   it("tracks the known offline-capable document routes", () => {
-    expect(OFFLINE_DOCUMENT_PATHS).toEqual(["/", "/settings", "/pair", "/about"]);
+    expect(OFFLINE_DOCUMENT_PATHS).toEqual(["/", "/settings", "/pair"]);
   });
 
   it("allows same-origin navigation requests for app routes", () => {
