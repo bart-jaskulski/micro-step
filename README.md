@@ -2,6 +2,32 @@
 
 Everything you need to build a Solid project, powered by [`solid-start`](https://start.solidjs.com);
 
+## Docker deployment
+
+The app can be run as a single Node container.
+
+1. Create a runtime env file:
+
+```bash
+cp .env.example .env
+```
+
+2. Set `GOOGLE_API_KEY` in `.env`.
+
+3. Build and start the app:
+
+```bash
+docker compose up --build -d
+```
+
+The app is exposed on `http://localhost:3000` by default.
+
+Notes:
+
+- The container runs the existing SolidStart/Nitro production server from `.output/server/index.mjs`.
+- `./storage` is mounted into the container so filesystem-backed sync data survives container recreation.
+- Task data remains local-first in the browser via OPFS/IndexedDB, so Docker does not add a backend database.
+
 ## Creating a project
 
 ```bash
