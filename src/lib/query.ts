@@ -11,7 +11,11 @@ SELECT *,
   END as is_stalled
 FROM tasks
 WHERE workspace_id = ?
-ORDER BY completed ASC, is_stalled DESC, parent_id ASC, rank ASC
+ORDER BY
+  CASE WHEN due_at IS NULL THEN 1 ELSE 0 END ASC,
+  due_at DESC,
+  created_at DESC,
+  rank ASC
 `;
 
 export const fetchMainViewTasks = <T = any>(workspaceId: string): Promise<T[]> =>

@@ -44,4 +44,15 @@ describe("preferencesStore", () => {
     expect(breakdownGranularity()).toBe("low");
     expect(window.localStorage.getItem(BREAKDOWN_GRANULARITY_STORAGE_KEY)).toBe("low");
   });
+
+  it("defaults the main task filter to active", async () => {
+    const {
+      DEFAULT_LIST_FILTER,
+      parseListFilter,
+    } = await import("./preferencesStore");
+
+    expect(DEFAULT_LIST_FILTER).toBe("active");
+    expect(parseListFilter(null)).toBe("active");
+    expect(parseListFilter("unexpected")).toBe("active");
+  });
 });

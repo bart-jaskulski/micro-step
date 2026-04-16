@@ -1,20 +1,15 @@
 import { Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
-import GripVertical from "lucide-solid/icons/grip-vertical";
 import Trash2 from "lucide-solid/icons/trash-2";
 import Calendar from "lucide-solid/icons/calendar";
 import Check from "lucide-solid/icons/check";
 import { formatDateInputValue, formatDueDateLabel, normalizeDateOnlyInput } from "~/lib/dates";
 import { deleteTask, updateTask } from "~/stores/taskStore";
 import type { Task } from "~/stores/taskStore";
-import { useDrag } from "./DragProvider";
 
-type TaskItemProps = Task & {
-  dragActivators?: Record<string, (event: HTMLElementEventMap[keyof HTMLElementEventMap]) => void>;
-};
+type TaskItemProps = Task;
 
 export default function TaskItem(props: TaskItemProps) {
-  const drag = useDrag();
   const [isEditing, setIsEditing] = createSignal(false);
   const [isEditingDueDate, setIsEditingDueDate] = createSignal(false);
   const [dueDateAnchor, setDueDateAnchor] = createSignal<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -118,17 +113,6 @@ export default function TaskItem(props: TaskItemProps) {
   return (
     <div class="relative w-full group/item">
       <div class="relative z-10 bg-white rounded-xl border border-stone-200 p-3.5 flex items-start gap-3 transition-all hover:shadow-md hover:border-stone-300">
-        
-        {/* Drag Handle */}
-        <div 
-          class="text-stone-300 cursor-grab active:cursor-grabbing mt-1.5 hover:text-stone-500 shrink-0 touch-none"
-          role="button"
-          aria-label="Drag to reorder"
-          onPointerDown={(event) => drag.startDrag(event, props.id, event.currentTarget as HTMLElement)}
-        >
-          <GripVertical class="w-4 h-4" />
-        </div>
-
         {/* Checkbox */}
         <div class="pt-1 shrink-0">
           <label class="relative flex items-center justify-center cursor-pointer group/check">

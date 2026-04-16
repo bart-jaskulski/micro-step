@@ -4,10 +4,27 @@ import { MAIN_VIEW_QUERY } from "./query";
 
 let db: InstanceType<typeof Database>;
 
+type TaskRow = {
+  id: string;
+  parent_id: string | null;
+  workspace_id: string;
+  text: string;
+  completed: number;
+  created_at: number;
+  updated_at: number;
+  due_at: number | null;
+  rank: string;
+};
+
+type QueryRow = {
+  id: string;
+};
+
 const CREATE_TABLE = `
   CREATE TABLE tasks (
     id TEXT PRIMARY KEY,
     parent_id TEXT,
+    workspace_id TEXT NOT NULL,
     text TEXT NOT NULL,
     completed INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
@@ -23,10 +40,11 @@ const eightDaysAgo = now - 8 * DAY;
 
 const insert = (
   id: string,
-  overrides: Record<string, any> = {},
+  overrides: Partial<TaskRow> = {},
 ) => {
   const defaults = {
     parent_id: null,
+    workspace_id: "default",
     text: `Task ${id}`,
     completed: 0,
     created_at: now,
@@ -36,8 +54,8 @@ const insert = (
   };
   const row = { id, ...defaults, ...overrides };
   db.prepare(
-    `INSERT INTO tasks (id, parent_id, text, completed, created_at, updated_at, due_at, rank)
-     VALUES (@id, @parent_id, @text, @completed, @created_at, @updated_at, @due_at, @rank)`,
+    `INSERT INTO tasks (id, parent_id, workspace_id, text, completed, created_at, updated_at, due_at, rank)
+     VALUES (@id, @parent_id, @workspace_id, @text, @completed, @created_at, @updated_at, @due_at, @rank)`,
   ).run(row);
 };
 
@@ -47,51 +65,32 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  db.close();
+  db?.close();
 });
 
 describe("MAIN_VIEW_QUERY ordering", () => {
-  it("stalled tasks appear before non-stalled incomplete tasks", () => {
-    insert("stalled", { created_at: eightDaysAgo, updated_at: eightDaysAgo, rank: "0|bbb:" });
-    insert("active", { rank: "0|aaa:" });
+  it("orders tasks by due date descending with undated tasks last", () => {
+    insert("later", { due_at: now + DAY });
+    insert("earlier", { due_at: now - DAY });
+    insert("undated", { due_at: null });
 
-    const rows = db.prepare(MAIN_VIEW_QUERY).all() as any[];
-    expect(rows[0].id).toBe("stalled");
-    expect(rows[0].is_stalled).toBe(1);
-    expect(rows[1].id).toBe("active");
-    expect(rows[1].is_stalled).toBe(0);
+    const rows = db.prepare(MAIN_VIEW_QUERY).all("default") as QueryRow[];
+    expect(rows.map((row) => row.id)).toEqual(["later", "earlier", "undated"]);
   });
 
-  it("completed tasks appear after incomplete tasks", () => {
-    insert("done", { completed: 1, rank: "0|aaa:" });
-    insert("todo", { completed: 0, rank: "0|bbb:" });
+  it("uses created_at descending when due dates match", () => {
+    insert("newer", { due_at: now + DAY, created_at: now + 1000, updated_at: now + 1000 });
+    insert("older", { due_at: now + DAY, created_at: now, updated_at: now });
 
-    const rows = db.prepare(MAIN_VIEW_QUERY).all() as any[];
-    expect(rows[0].id).toBe("todo");
-    expect(rows[1].id).toBe("done");
+    const rows = db.prepare(MAIN_VIEW_QUERY).all("default") as QueryRow[];
+    expect(rows.map((row) => row.id)).toEqual(["newer", "older"]);
   });
 
-  it("sibling order follows rank within stalled/non-stalled groups", () => {
-    insert("b", { rank: "0|bbb:" });
-    insert("a", { rank: "0|aaa:" });
-    insert("stalled-b", { created_at: eightDaysAgo, updated_at: eightDaysAgo, rank: "0|sbb:" });
-    insert("stalled-a", { created_at: eightDaysAgo, updated_at: eightDaysAgo, rank: "0|saa:" });
+  it("falls back to rank when due date and created_at match", () => {
+    insert("b", { due_at: now + DAY, created_at: eightDaysAgo, updated_at: eightDaysAgo, rank: "0|bbb:" });
+    insert("a", { due_at: now + DAY, created_at: eightDaysAgo, updated_at: eightDaysAgo, rank: "0|aaa:" });
 
-    const rows = db.prepare(MAIN_VIEW_QUERY).all() as any[];
-    const ids = rows.map((r: any) => r.id);
-    expect(ids).toEqual(["stalled-a", "stalled-b", "a", "b"]);
-  });
-
-  it("subtask hierarchy is preserved via parent_id grouping", () => {
-    insert("parent", { rank: "0|aaa:" });
-    insert("child-b", { parent_id: "parent", rank: "0|bbb:" });
-    insert("child-a", { parent_id: "parent", rank: "0|aaa:" });
-    insert("root-b", { rank: "0|bbb:" });
-
-    const rows = db.prepare(MAIN_VIEW_QUERY).all() as any[];
-    const ids = rows.map((r: any) => r.id);
-    // Root tasks (parent_id NULL) sort first, then children grouped by parent_id
-    expect(ids.indexOf("parent")).toBeLessThan(ids.indexOf("child-a"));
-    expect(ids.indexOf("child-a")).toBeLessThan(ids.indexOf("child-b"));
+    const rows = db.prepare(MAIN_VIEW_QUERY).all("default") as QueryRow[];
+    expect(rows.map((row) => row.id)).toEqual(["a", "b"]);
   });
 });
